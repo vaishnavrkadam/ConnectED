@@ -114,10 +114,10 @@ const DoubtResolutionDialog = ({ open, onClose, doubt, isFaculty }) => {
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>Doubt Resolution: {doubt?.subject}</DialogTitle>
+      <DialogTitle>Doubt Resolution: {doubt?.title || doubt?.subject}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="h6" gutterBottom>
-            {doubt?.doubt} 
+            {doubt?.description || doubt?.doubt} 
             <Chip 
                 label={doubt?.status.toUpperCase()} 
                 size="small" 
