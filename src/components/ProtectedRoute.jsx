@@ -1,48 +1,41 @@
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { Box, CircularProgress, Typography } from '@mui/material';
+// src/components/ProtectedRoute.jsx
+import React from "react";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { Box, CircularProgress } from "@mui/material";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
-  const { user, role, loading } = useAuth();
+  const { isLoggedIn, role, loading } = useAuth();
 
-  // 1. While Firebase is still checking who you are, show a loading spinner
+  // 1. CRITICAL: Wait until BOTH Auth and Firestore Profile listeners drop their loading state
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <CircularProgress />
-        <Typography sx={{ mt: 2 }}>Verifying Access...</Typography>
+      <Box 
+        sx={{ 
+          minHeight: "100vh", 
+          display: "flex", 
+          justifyContent: "center", 
+          alignItems: "center",
+          bgcolor: "#111415" // Sourced from your Aetheric Lumina surface spec
+        }}
+      >
+        <CircularProgress color="secondary" />
       </Box>
     );
   }
 
-  // 2. If no one is logged in at all, go to login page
-  if (!user) {
-    return <Navigate to="/login" replace />;
+  // 2. If the loading finishes and no user session exists, send to Landing Hub
+  if (!isLoggedIn) {
+    return <Navigate to="/" replace />;
   }
 
-  // 3. If logged in but the role hasn't loaded yet, wait a bit longer
-  if (user && !role) {
-    return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <CircularProgress size={20} />
-        <Typography sx={{ mt: 2 }}>Setting up your profile...</Typography>
-      </Box>
-    );
-  }
-
-  // 4. If the role doesn't match (e.g., student trying to enter faculty page)
+  // 3. If a role filter is active, verify the loaded profile role matches
   if (allowedRoles && !allowedRoles.includes(role)) {
-    return (
-      <Box sx={{ p: 4, textAlign: 'center' }}>
-        <Typography variant="h4" color="error">Access Denied</Typography>
-        <Typography>You are logged in as a {role}, which doesn't have access to this page.</Typography>
-        <Navigate to={role === 'student' ? '/student' : '/faculty'} replace />
-      </Box>
-    );
+    console.warn(`Access denied for role: ${role}. Required roles:`, allowedRoles);
+    return <Navigate to="/" replace />;
   }
 
-  // 5. Everything is fine, show the dashboard!
+  // State is validated successfully; render dashboard panels safely
   return children;
 };
 

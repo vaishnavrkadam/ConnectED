@@ -1,418 +1,747 @@
-import React, { useEffect, useState } from "react";
+// src/pages/StudentDashboard.jsx
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
 import {
   Box,
-  Typography,
-  Button,
+  Grid,
   Card,
   CardContent,
-  TextField,
-  Stack,
-  Alert,
-  Divider,
+  Typography,
+  Avatar,
   Chip,
-  CircularProgress
+  Button,
+  IconButton,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Stack,
+  TextField,
+  Alert,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  useTheme
 } from "@mui/material";
-import QuestionMarkIcon from '@mui/icons-material/QuestionMark';
-import HistoryIcon from '@mui/icons-material/History';
+import { collection, query, where, onSnapshot, orderBy, getDocs, addDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  or,
-  addDoc,
-  serverTimestamp
-} from "firebase/firestore";
-import Layout from "../components/Layout";
-import FindFacultyDialog from "../components/FindFacultyDialog";
-import DoubtResolutionDialog from "../components/DoubtResolutionDialog"; 
-import ExpertiseSidebar from '../components/ExpertiseSidebar'; 
-import { useAuth } from "../context/AuthContext"; 
 
-const getAsDate = (val) => {
-  if (!val) return new Date(0);
-  if (typeof val.toDate === 'function') return val.toDate();
-  return new Date(val);
-};
+// Sidebar & General Icons
+import DashboardIcon from "@mui/icons-material/Dashboard";
+import QuestionAnswerIcon from "@mui/icons-material/QuestionAnswer";
+import GroupsIcon from "@mui/icons-material/Groups";
+import AssignmentIcon from "@mui/icons-material/Assignment";
+import EventIcon from "@mui/icons-material/Event";
+import LogoutIcon from "@mui/icons-material/Logout";
+import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import SearchIcon from "@mui/icons-material/Search";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import HubIcon from "@mui/icons-material/Hub";
 
-const SubmitDoubtComponent = () => {
-  const { profile, extendedProfile } = useAuth();
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [loading, setLoading] = useState(false);
+import collegeBg from "../assets/college-bg-entr.jpg";
 
-  const handleCreateDoubt = async (title, description) => {
-    // Generate simple client-side search array for zero-cost semantic search execution
-    const searchKeywords = title.toLowerCase().split(" ").filter(word => word.length > 2);
+const StudentDashboard = () => {
+  const { profile, extendedProfile, signOut } = useAuth();
+  const theme = useTheme();
+  const [activeTab, setActiveTab] = useState("overview");
 
-    const doubtPayload = {
-      studentUsn: profile.primaryId,       // Updated to use Natural Key USN
-      studentName: extendedProfile.name,   // Sourced directly from verified live document
-      title: title,
-      description: description,
-      searchKeywords: searchKeywords,      // Client side processing for spark tier optimization
-      assignedFacultyId: extendedProfile.counsellorSapId, // Base routing initially targets default counsellor SAP ID
-      status: "pending",
-      rejectedBy: [],                      // Tracks faculty rejections for the re-routing engine
-      createdAt: serverTimestamp(),
-      resolvedAt: null,
-      solutionSummary: null
-    };
+  // Sidebar Expertise Explorer State Elements
+  const [globalExpertiseList, setGlobalExpertiseList] = useState([]);
+  const [selectedExpertise, setSelectedExpertise] = useState(null);
+  const [facultyModalOpen, setFacultyModalOpen] = useState(false);
+  const [matchingFaculty, setMatchingFaculty] = useState([]);
 
-    await addDoc(collection(db, "doubts"), doubtPayload);
+  const studentData = extendedProfile || {
+    name: profile?.name || "Verified Student",
+    branch: "Loading...",
+    semester: "-",
+    section: "-",
+    activityPointsSummary: { approvedPoints: 0, pendingPoints: 0 }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!title.trim() || !description.trim()) {
-      setError("Please fill in both title and description.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    setSuccess("");
+  const usnIdentifier = profile?.primaryId || "USN Unassigned";
+
+  // Aggregate a live unique deduplicated array of all faculty expertise fields
+  useEffect(() => {
+    const facultyRef = collection(db, "faculty");
+    const unsubscribe = onSnapshot(facultyRef, (snapshot) => {
+      const expertiseSet = new Set();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.expertise && Array.isArray(data.expertise)) {
+          data.expertise.forEach((exp) => {
+            if (exp) expertiseSet.add(exp.trim().toLowerCase());
+          });
+        }
+      });
+      setGlobalExpertiseList(Array.from(expertiseSet).sort());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleExpertiseClick = async (skill) => {
+    setSelectedExpertise(skill);
+    setFacultyModalOpen(true);
+    
     try {
-      await handleCreateDoubt(title, description);
-      setSuccess("Doubt submitted successfully!");
-      setTitle("");
-      setDescription("");
+      const facultyRef = collection(db, "faculty");
+      const snapshot = await getDocs(facultyRef);
+      const experts = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.expertise && Array.isArray(data.expertise)) {
+          const hasSkill = data.expertise.some(
+            (e) => e.trim().toLowerCase() === skill.toLowerCase()
+          );
+          if (hasSkill) {
+            experts.push({ id: doc.id, ...data });
+          }
+        }
+      });
+      setMatchingFaculty(experts);
     } catch (err) {
-      console.error(err);
-      setError("Failed to submit doubt. Please try again.");
-    } finally {
-      setLoading(false);
+      console.error("Error matching faculty expertise:", err);
     }
   };
 
   return (
-    <Card sx={{ mb: 4, boxShadow: 6, borderLeft: '5px solid #1976d2' }}>
-      <CardContent>
-        <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <QuestionMarkIcon color="primary" sx={{ mr: 1 }} />
-            Ask a New Doubt
-        </Typography>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
-        <Box component="form" onSubmit={handleSubmit}>
-          <TextField
-            label="Doubt Title"
-            fullWidth
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            sx={{ mb: 2 }}
-            placeholder="e.g. Stuck on React state update after Firestore write"
-            required
-            disabled={loading}
-          />
-          <TextField
-            label="Description"
-            multiline
-            minRows={4}
-            fullWidth
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            sx={{ mb: 2 }}
-            placeholder="Describe your doubt in detail..."
-            required
-            disabled={loading}
-          />
-          <Button 
-            type="submit"
-            variant="contained" 
-            color="primary"
-            disabled={loading || !title.trim() || !description.trim()}
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundImage: `linear-gradient(rgba(12, 14, 16, 0.92), rgba(12, 14, 16, 0.97)), url(${collegeBg})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundAttachment: "fixed",
+        color: "#e2e2e4",
+        display: "flex",
+        flexDirection: { xs: "column", md: "row" }
+      }}
+    >
+      {/* --- SIDEBAR PANEL NAVIGATION --- */}
+      <Box
+        sx={{
+          width: { xs: "100%", md: 280 },
+          bgcolor: "rgba(25, 28, 29, 0.85)",
+          backdropFilter: "blur(20px)",
+          borderRight: { xs: "none", md: "1px solid rgba(255, 255, 255, 0.08)" },
+          borderBottom: { xs: "1px solid rgba(255, 255, 255, 0.08)", md: "none" },
+          display: "flex",
+          flexDirection: "column",
+          p: 3,
+          maxHeight: { md: "100vh" },
+          overflowY: "auto"
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3, mt: 1 }}>
+          <Avatar
+            sx={{
+              bgcolor: theme.palette.secondary.main,
+              color: "#64003a",
+              fontWeight: 700,
+              width: 44,
+              height: 44,
+              boxShadow: "0 0 12px rgba(255, 176, 206, 0.4)"
+            }}
           >
-            {loading ? <CircularProgress size={20} color="inherit" /> : "Submit Doubt"}
-          </Button>
+            {studentData.name.charAt(0)}
+          </Avatar>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={700} noWrap sx={{ maxWidth: 170 }}>
+              {studentData.name}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "#c6c5d7", opacity: 0.8 }}>
+              {usnIdentifier}
+            </Typography>
+          </Box>
         </Box>
-      </CardContent>
-    </Card>
+
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.08)", mb: 2 }} />
+
+        <List sx={{ p: 0 }}>
+          {[
+            { id: "overview", text: "Dashboard Overview", icon: <DashboardIcon /> },
+            { id: "doubts", text: "Doubt Resolution", icon: <QuestionAnswerIcon /> },
+            { id: "clubs", text: "Club Operations", icon: <GroupsIcon /> },
+            { id: "mentorship", text: "Project Teams", icon: <AssignmentIcon /> },
+            { id: "appointments", text: "Counseling Slots", icon: <EventIcon /> }
+          ].map((item) => (
+            <ListItem
+              button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              sx={{
+                borderRadius: 2,
+                mb: 0.5,
+                bgcolor: activeTab === item.id ? "rgba(192, 193, 255, 0.12)" : "transparent",
+                color: activeTab === item.id ? "#c0c1ff" : "#e2e2e4",
+                "&:hover": { bgcolor: "rgba(255, 255, 255, 0.05)" },
+                cursor: "pointer"
+              }}
+            >
+              <ListItemIcon sx={{ color: activeTab === item.id ? "#c0c1ff" : "inherit", minWidth: 36 }}>
+                {item.icon}
+              </ListItemIcon>
+              <ListItemText primary={item.text} primaryTypographyProps={{ fontSize: "0.9rem", fontWeight: 600 }} />
+            </ListItem>
+          ))}
+        </List>
+
+        {/* --- EXPERTISE EXPLORER IN THE SIDEBAR --- */}
+        <Box sx={{ mt: 2, mb: 2, flexGrow: 1 }}>
+          <Typography variant="caption" fontWeight={700} sx={{ color: "#c0c1ff", letterSpacing: "1px", display: "block", mb: 1, px: 1 }}>
+            EXPERTISE EXPLORER
+          </Typography>
+          <Box 
+            sx={{ 
+              maxHeight: 180, 
+              overflowY: "auto", 
+              bgcolor: "rgba(0,0,0,0.2)", 
+              borderRadius: 2, 
+              p: 1,
+              border: "1px solid rgba(255,255,255,0.04)"
+            }}
+          >
+            {globalExpertiseList.length === 0 ? (
+              <Typography variant="caption" sx={{ p: 1, display: "block", opacity: 0.5 }}>Loading skills...</Typography>
+            ) : (
+              globalExpertiseList.map((skill) => (
+                <Box
+                  key={skill}
+                  onClick={() => handleExpertiseClick(skill)}
+                  sx={{
+                    p: 1,
+                    borderRadius: 1,
+                    cursor: "pointer",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    color: "#c6c5d7",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1,
+                    "&:hover": { bgcolor: "rgba(255, 255, 255, 0.05)", color: "#ffb0ce" }
+                  }}
+                >
+                  <HubIcon sx={{ fontSize: 14, color: "rgba(192, 193, 255, 0.5)" }} />
+                  <span style={{ textTransform: "capitalize" }}>{skill}</span>
+                </Box>
+              ))
+            )}
+          </Box>
+        </Box>
+
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.08)", mb: 2 }} />
+
+        <Button
+          variant="text"
+          startIcon={<LogoutIcon />}
+          onClick={signOut}
+          sx={{
+            color: "#ffb0ce",
+            justifyContent: "flex-start",
+            textTransform: "none",
+            fontWeight: 600,
+            pt: 1,
+            pb: 1
+          }}
+        >
+          Sign Out Workspace
+        </Button>
+      </Box>
+
+      {/* --- MAIN WORKSPACE WINDOW --- */}
+      <Box sx={{ flexGrow: 1, p: { xs: 2, sm: 4, md: 5 }, overflowY: "auto", maxHeight: "100vh" }}>
+        
+        {/* VIEW 1: MASTER GENERAL OVERVIEW DASHBOARD */}
+        {activeTab === "overview" && (
+          <Box>
+            <Box sx={{ mb: 4, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+              <Box>
+                <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.5px" }}>
+                  Student Workspace
+                </Typography>
+                <Typography variant="body2" sx={{ color: "#c6c5d7", opacity: 0.85, mt: 0.5 }}>
+                  Academic Pipeline Monitoring Matrix
+                </Typography>
+              </Box>
+              <Chip
+                label={`Semester ${studentData.semester} — Sec ${studentData.section}`}
+                sx={{
+                  bgcolor: "rgba(192, 193, 255, 0.15)",
+                  color: "#c0c1ff",
+                  fontWeight: 700,
+                  border: "1px solid rgba(192, 193, 255, 0.25)",
+                  borderRadius: "8px"
+                }}
+              />
+            </Box>
+
+            <Grid container spacing={3.5}>
+              <Grid item xs={12} lg={4}>
+                <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.5)", backdropFilter: "blur(20px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", color: "white" }}>
+                  <CardContent sx={{ p: 4 }}>
+                    <Typography variant="h6" fontWeight={700} sx={{ mb: 3, color: "#c0c1ff" }}>Academic Credentials</Typography>
+                    <Stack spacing={2.5}>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mb: 0.5 }}>DEPARTMENT BRANCH</Typography>
+                        <Typography variant="body1" fontWeight={600}>{studentData.branch}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mb: 0.5 }}>UNIVERSITY SEAT NUMBER (USN)</Typography>
+                        <Typography variant="body1" fontWeight={600} sx={{ fontFamily: "monospace" }}>{usnIdentifier}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mb: 0.5 }}>CONNECTED TELEPHONY</Typography>
+                        <Typography variant="body1" fontWeight={600}>{studentData.phoneNumber || "None Linked"}</Typography>
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} md={6} lg={4}>
+                <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.5)", backdropFilter: "blur(20px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", color: "white", height: "100%" }}>
+                  <CardContent sx={{ p: 4, display: "flex", flexDirection: "column", height: "100%" }}>
+                    <Typography variant="h6" fontWeight={700} sx={{ mb: 3, color: "#ffb0ce" }}>AICTE Activity Points</Typography>
+                    <Stack spacing={3} sx={{ flexGrow: 1, justifyContent: "center" }}>
+                      <Box sx={{ display: "flex", alignItems: "center" }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <CheckCircleOutlineIcon sx={{ color: "#4caf50" }} />
+                          <Typography variant="body1" fontWeight={600}>Approved Points</Typography>
+                        </Stack>
+                        <Typography variant="h5" fontWeight={800} sx={{ ml: "auto", color: "#4caf50" }}>{studentData.activityPointsSummary?.approvedPoints || 0}</Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", alignItems: "center" }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <HourglassEmptyIcon sx={{ color: "#ffb74d" }} />
+                          <Typography variant="body1" fontWeight={600}>Pending Verification</Typography>
+                        </Stack>
+                        <Typography variant="h5" fontWeight={800} sx={{ ml: "auto", color: "#ffb74d" }}>{studentData.activityPointsSummary?.pendingPoints || 0}</Typography>
+                      </Box>
+                    </Stack>
+                    <Divider sx={{ borderColor: "rgba(255,255,255,0.08)", my: 2 }} />
+                    <Typography variant="caption" sx={{ color: "#c6c5d7", opacity: 0.6, textAlign: "center" }}>Requires 100 overall points for graduation clearance.</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} md={6} lg={4}>
+                <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.5)", backdropFilter: "blur(20px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", color: "white" }}>
+                  <CardContent sx={{ p: 4 }}>
+                    <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: "#e2e2e4" }}>Quick Action Portal</Typography>
+                    <List disablePadding>
+                      {[
+                        { text: "Log An Academic Doubt", action: () => setActiveTab("doubts") },
+                        { text: "Check Club Action Requests", action: () => setActiveTab("clubs") },
+                        { text: "Review Mentor Appointments", action: () => setActiveTab("appointments") }
+                      ].map((actionItem, idx) => (
+                        <Box key={idx}>
+                          <ListItem secondaryAction={<IconButton edge="end" sx={{ color: "#c0c1ff" }}><ArrowForwardIosIcon sx={{ fontSize: 14 }} /></IconButton>} disablePadding sx={{ py: 1.5, cursor: "pointer" }} onClick={actionItem.action}>
+                            <ListItemText primary={actionItem.text} primaryTypographyProps={{ fontSize: "0.92rem", fontWeight: 600 }} />
+                          </ListItem>
+                          {idx < 2 && <Divider sx={{ borderColor: "rgba(255,255,255,0.06)" }} />}
+                        </Box>
+                      ))}
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+
+        {/* VIEW 2: FULL WIDTH DOUBT WORKSPACE ROUTE TARGET */}
+        {activeTab === "doubts" && (
+          <DoubtResolutionPortal 
+            studentUsn={usnIdentifier}
+            studentName={studentData.name}
+            counsellorSapId={studentData.counsellorSapId}
+            onBack={() => setActiveTab("overview")}
+          />
+        )}
+
+        {/* OTHER FALLBACK TARGET MODULES */}
+        {activeTab !== "overview" && activeTab !== "doubts" && (
+          <Box>
+            <Button startIcon={<ArrowBackIcon />} onClick={() => setActiveTab("overview")} sx={{ color: "#c0c1ff", mb: 3, textTransform: "none" }}>Back to Overview</Button>
+            <Card sx={{ bgcolor: "rgba(25, 28, 29, 0.5)", backdropFilter: "blur(25px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", p: 4, textAlign: "center" }}>
+              <Typography variant="h6" fontWeight={700}>{activeTab.toUpperCase()} Module Workspace</Typography>
+              <Typography variant="body2" sx={{ color: "#c6c5d7", opacity: 0.7, mt: 1 }}>Component system initializing.</Typography>
+            </Card>
+          </Box>
+        )}
+      </Box>
+
+      {/* SIDEBAR EXPLORER LIST POP-UP DIALOG MODAL MAP */}
+      <Dialog 
+        open={facultyModalOpen} 
+        onClose={() => setFacultyModalOpen(false)}
+        PaperProps={{
+          sx: { bgcolor: "#1a1c1d", color: "white", borderRadius: 3, border: "1px solid rgba(255,255,255,0.1)", width: "100%", maxWidth: 450 }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,0.08)", textTransform: "capitalize" }}>
+          Experts in: {selectedExpertise}
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2, p: 3 }}>
+          {matchingFaculty.length === 0 ? (
+            <Box sx={{ textAlign: "center", py: 2 }}>
+              <CircularProgress size={24} color="secondary" />
+              <Typography variant="body2" sx={{ color: "#c6c5d7", mt: 1 }}>Scanning faculty manifests...</Typography>
+            </Box>
+          ) : (
+            <Stack spacing={2}>
+              {matchingFaculty.map((fac) => (
+                <Box key={fac.id} sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <Typography variant="body1" fontWeight={700} color="#c0c1ff">{fac.name}</Typography>
+                  <Typography variant="body2" sx={{ color: "#c6c5d7", fontFamily: "monospace", mt: 0.5 }}>SAP ID: {fac.id}</Typography>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.5)", display: "block", mt: 0.5 }}>Dept: {fac.department}</Typography>
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Box>
   );
 };
 
-const StudentDashboard = () => {
-  const { user, profile, loading, signOut } = useAuth();
-  if (loading || !profile) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-  const [myDoubts, setMyDoubts] = useState([]);
-  const [myAppointments, setMyAppointments] = useState([]); // Appointments state added
-  const [openFind, setOpenFind] = useState(false);
-  
-  // State for the resolution dialog (Viewing response)
-  const [openResolution, setOpenResolution] = useState(false);
-  const [selectedDoubt, setSelectedDoubt] = useState(null);
-  
-  const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
-  
-  const [avgResolutionTime, setAvgResolutionTime] = useState(null); // <-- NEW STATE for KPI
+// ---- EXPANDED DOUBT WORKSPACE CONSOLE & REPLICA LEDGER QUEUE ----
+const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBack }) => {
+  const [singleDoubtInput, setSingleDoubtInput] = useState("");
+  const [historicalDoubts, setHistoricalDoubts] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [feedback, setFeedback] = useState({ type: "", msg: "" });
 
+  // Intelligent Assignment Dialog States Sourced from FacultyAssignmentDialog Blueprint
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [matchedFacultyPool, setMatchedFacultyPool] = useState([]);
+  const [analyzingPool, setAnalyzingPool] = useState(false);
+  const [selectedFacultyId, setSelectedFacultyId] = useState(null);
 
-  /* LOAD DOUBTS */
+  // REALTIME REAL-TIME ACTION LISTENER SYNC ENGINE
   useEffect(() => {
-    if (!user) return;
-
-    const conditions = [];
-    if (profile?.primaryId) {
-      conditions.push(where("studentUsn", "==", profile.primaryId));
-    }
-    if (user?.uid) {
-      conditions.push(where("studentId", "==", user.uid));
-    }
-
-    if (conditions.length === 0) return;
-
+    const doubtsRef = collection(db, "doubts");
     const q = query(
-      collection(db, "doubts"),
-      conditions.length > 1 ? or(...conditions) : conditions[0]
+      doubtsRef,
+      where("studentUsn", "==", studentUsn),
+      orderBy("createdAt", "desc")
     );
 
-    const unsub = onSnapshot(q, (snap) => {
-      const list = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setMyDoubts(list.sort((a, b) => getAsDate(b.createdAt).getTime() - getAsDate(a.createdAt).getTime()));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const issues = [];
+      snapshot.forEach((doc) => {
+        issues.push({ id: doc.id, ...doc.data() });
+      });
+      setHistoricalDoubts(issues);
+    }, (error) => {
+      console.error("Pipeline breakdown:", error);
     });
 
-    return () => unsub();
-  }, [user, profile]); 
+    return () => unsubscribe();
+  }, [studentUsn]);
 
-  /* LOAD APPOINTMENTS */
-  useEffect(() => {
-    if (!user) return; 
+  // Invokes matching algorithms on the description input text string
+  const handleAnalyzeAndOpenSelector = async (e) => {
+    e.preventDefault();
+    setFeedback({ type: "", msg: "" });
 
-    const q = query(collection(db, "appointments"), where("studentId", "==", user.uid));
-
-    const unsub = onSnapshot(q, (snap) => {
-        const list = [];
-        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-        setMyAppointments(list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
-    });
-
-    return () => unsub();
-  }, [user]); 
-
-  // =========================================================
-  // KPI CALCULATION LOGIC
-  // =========================================================
-  useEffect(() => {
-    if (myDoubts.length === 0) {
-        setAvgResolutionTime(null);
-        return;
+    const promptText = singleDoubtInput.trim();
+    if (!promptText) {
+      setFeedback({ type: "error", msg: "Please enter your doubt details for analysis." });
+      return;
     }
 
-    let totalTimeMs = 0;
-    let resolvedCount = 0;
+    setAnalyzingPool(true);
 
-    myDoubts.forEach(doubt => {
-        // Ensure doubt is resolved and has timestamps
-        if (doubt.status === 'resolved' && doubt.resolvedAt && doubt.createdAt) {
-            const submissionTime = getAsDate(doubt.createdAt).getTime();
-            const resolutionTime = getAsDate(doubt.resolvedAt).getTime();
-            
-            if (resolutionTime > submissionTime) {
-                totalTimeMs += resolutionTime - submissionTime;
-                resolvedCount++;
-            }
+    try {
+      const cleanKeywords = promptText
+        .toLowerCase()
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .split(/\s+/)
+        .filter((word) => word.length > 2);
+
+      const uniqueKeywords = Array.from(new Set(cleanKeywords));
+      
+      const facultySnapshot = await getDocs(collection(db, "faculty"));
+      const scoringMatrix = [];
+
+      facultySnapshot.forEach((doc) => {
+        const fac = doc.data();
+        if (fac.expertise && Array.isArray(fac.expertise)) {
+          // Count keyword intersection metrics
+          const matches = fac.expertise.filter((skill) => 
+            uniqueKeywords.includes(skill.toLowerCase().trim())
+          );
+          
+          if (matches.length > 0) {
+            scoringMatrix.push({
+              id: doc.id,
+              name: fac.name,
+              department: fac.department || "General Academics",
+              score: matches.length,
+              matchedExpertise: matches.join(", ")
+            });
+          }
         }
-    });
+      });
 
-    if (resolvedCount > 0) {
-        // Calculate average time in hours
-        const avgTimeHours = (totalTimeMs / resolvedCount) / (1000 * 60 * 60); 
-        
-        // Format to two decimal places
-        setAvgResolutionTime(avgTimeHours.toFixed(2));
-    } else {
-        setAvgResolutionTime(null);
+      // Sort by score and take the top 4 matched entries
+      const topMatches = scoringMatrix
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 4);
+
+      // Fallback default routing option if keyword mapping yielded nothing
+      if (topMatches.length === 0 && counsellorSapId) {
+        topMatches.push({
+          id: counsellorSapId,
+          name: "Academic Counselor (Default Router)",
+          department: "Department Hub",
+          score: 0,
+          matchedExpertise: "General Fallback Routing"
+        });
+      }
+
+      setMatchedFacultyPool(topMatches);
+      setSelectedFacultyId(topMatches[0]?.id || null);
+      setAssignDialogOpen(true);
+
+    } catch (err) {
+      console.error(err);
+      setFeedback({ type: "error", msg: "Expertise mapping arrays analysis failure." });
+    } finally {
+      setAnalyzingPool(false);
     }
-  }, [myDoubts]); // Recalculate whenever doubts list changes
-
-
-  // Function to open the resolution viewing dialog
-  const handleViewDoubt = (doubt) => {
-      setSelectedDoubt(doubt);
-      setOpenResolution(true);
-  };
-  
-  // Helper for rendering the KPI
-  const renderAvgTime = () => {
-    if (avgResolutionTime) {
-        return (
-            <Card sx={{ p: 2, bgcolor: 'primary.light', minWidth: 200, textAlign: 'center', boxShadow: 3 }}>
-                <Typography variant="h5" fontWeight={700} color="primary.main">
-                    {avgResolutionTime} hrs
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                    Avg. Resolution Time
-                </Typography>
-            </Card>
-        );
-    }
-    return null;
   };
 
+  // Writes the final query payload using the chosen professor's SAP ID
+  const finalizeDoubtAssignment = async () => {
+    if (!selectedFacultyId) return;
+    setAnalyzingPool(true);
+
+    try {
+      const promptText = singleDoubtInput.trim();
+      const cleanKeywords = promptText
+        .toLowerCase()
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .split(/\s+/)
+        .filter((word) => word.length > 2);
+
+      const headerExcerpt = promptText.split(/[.!?]/)[0].substring(0, 55) + "...";
+
+      await addDoc(collection(db, "doubts"), {
+        studentUsn: studentUsn,
+        studentName: studentName,
+        title: headerExcerpt,
+        description: promptText,
+        searchKeywords: Array.from(new Set(cleanKeywords)),
+        assignedFacultyId: selectedFacultyId, // Dynamic value based on choice selection
+        status: "pending",
+        rejectedBy: [],
+        createdAt: serverTimestamp(),
+        resolvedAt: null,
+        solutionSummary: null
+      });
+
+      setFeedback({ type: "success", msg: `Doubt successfully locked and routed to Faculty ID: [${selectedFacultyId}]` });
+      setSingleDoubtInput("");
+      setAssignDialogOpen(false);
+    } catch (err) {
+      console.error(err);
+      setFeedback({ type: "error", msg: "Failed to dispatch database write." });
+    } {
+      setAnalyzingPool(false);
+    }
+  };
+
+  const filteredDoubts = historicalDoubts.filter(item => 
+    item.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    item.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
-    <Layout> 
-      {/* FIX: Container for the Sidebar and Main Content */}
-      <Box sx={{ display: 'flex', minHeight: '100vh', mt: -4, ml: -20, mr: -10 }}> 
-        
-        {/* SIDEBAR */}
-        <ExpertiseSidebar /> 
-        
-        {/* Main Content Area */}
-        <Box sx={{ flexGrow: 1, p: 3, pt: 4 }}> 
-            <Typography variant="h4" fontWeight={600} gutterBottom>
-                Student Portal
-            </Typography>
-            <Divider sx={{ mb: 3 }} />
+    <Box>
+      <Box sx={{ mb: 3, display: "flex", alignItems: "center", gap: 2 }}>
+        <IconButton onClick={onBack} sx={{ color: "white", bgcolor: "rgba(255,255,255,0.05)" }}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Box>
+          <Typography variant="h5" fontWeight={700}>Doubt Resolution Panel</Typography>
+          <Typography variant="caption" sx={{ color: "#c6c5d7", opacity: 0.6 }}>Full-Width Expanded Workspace Component Layout</Typography>
+        </Box>
+      </Box>
 
-            {/* Action Button, KPI, & Feedback */}
-            {/* Replace your Action Button Stack with this: */}
-            <Stack direction="row" spacing={3} justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}> 
-                <Stack direction="row" spacing={2} alignItems="center">
-                    {renderAvgTime()} 
-                    <Button
-                        variant="contained"
-                        color="secondary"
-                        onClick={() => setOpenFind(true)}
-                    >
-                        Faculty Locator
-                    </Button>
-                </Stack>
-            </Stack>
-        
+      {feedback.msg && <Alert severity={feedback.type} sx={{ mb: 3, borderRadius: 2 }}>{feedback.msg}</Alert>}
 
-            {/* ROW 1: ASK DOUBT */}
-            <SubmitDoubtComponent />
+      {/* FULL-WIDTH CONSOLE INPUT WORKSPACE CARD PANE */}
+      <Card sx={{ bgcolor: "rgba(22, 24, 25, 0.7)", borderRadius: 3, border: "1px solid rgba(192, 193, 255, 0.15)", mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="body2" fontWeight={600} sx={{ mb: 1.5, color: "rgba(255,255,255,0.8)" }}>
+            Describe your technical or academic issue:
+          </Typography>
+          <Box component="form" onSubmit={handleAnalyzeAndOpenSelector}>
+            <TextField
+              fullWidth
+              multiline
+              rows={4}
+              variant="outlined"
+              value={singleDoubtInput}
+              onChange={(e) => setSingleDoubtInput(e.target.value)}
+              placeholder="Paste terminal logs or type academic questions here. The engine will match and list the top 3-4 professors specializing in this topic for your final selection..."
+              sx={{
+                mb: 2,
+                "& .MuiOutlinedInput-root": {
+                  color: "white",
+                  bgcolor: "rgba(0,0,0,0.25)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.08)" }
+                }
+              }}
+            />
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                type="submit"
+                variant="contained"
+                color="secondary"
+                disabled={analyzingPool}
+                sx={{ px: 5, py: 1.2, fontWeight: 700, textTransform: "none", borderRadius: 2 }}
+              >
+                {analyzingPool ? <CircularProgress size={20} color="inherit" /> : "Analyze & Match Faculty"}
+              </Button>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
 
-            {/* ROW 2: YOUR DOUBTS HISTORY */}
-            <Card sx={{ mb: 4, boxShadow: 2 }}>
-              <CardContent>
-                <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <HistoryIcon sx={{ mr: 1 }} />
-                    Your Doubt History
-                </Typography>
-                
-                {myDoubts.length === 0 ? (
-                  <Alert severity="info">No doubts submitted yet. Ask your first doubt above!</Alert>
-                ) : (
-                  <Stack spacing={2}>
-                    {myDoubts.map((d) => (
-                      <Card 
-                        key={d.id} 
-                        variant="outlined"
-                        onClick={() => handleViewDoubt(d)} // <-- Click to view conversation
-                        sx={{ 
-                            cursor: 'pointer',
-                            transition: '0.3s',
-                            '&:hover': { bgcolor: '#fafafa' }
-                        }}
-                      >
-                        <CardContent>
-                          <Stack direction="row" justifyContent="space-between" alignItems="center">
-                            <Typography variant="h6" color="primary.dark" sx={{ fontSize: '1.1rem' }}>
-                              {d.title || d.subject || "Untitled doubt"}
-                            </Typography>
-                            <Chip
-                              label={d.status.toUpperCase()}
-                              color={d.status === "resolved" || d.status === "accepted" || d.status === "scheduled" ? "success" : "error"}
-                              size="small"
-                            />
-                          </Stack>
+      {/* CONTROL FILTER INPUT */}
+      <Box sx={{ mb: 3 }}>
+        <TextField
+          size="small"
+          placeholder="Filter active pipeline entries..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          InputProps={{
+            startAdornment: <SearchIcon sx={{ color: "rgba(255,255,255,0.3)", mr: 1, fontSize: 20 }} />
+          }}
+          sx={{
+            width: 320,
+            "& .MuiOutlinedInput-root": {
+              color: "white",
+              bgcolor: "rgba(255,255,255,0.03)",
+              borderRadius: 2,
+              "& fieldset": { borderColor: "rgba(255,255,255,0.08)" }
+            }
+          }}
+        />
+      </Box>
 
-                          <Typography sx={{ mt: 0.5, fontStyle: 'italic' }}>
-                            {(d.description || d.doubt || "").substring(0, 80)}{(d.description || d.doubt || "").length > 80 ? '...' : ''}
-                          </Typography>
+      {/* COMPONENT RECENT PIPELINE VIEW LEDGER GRID */}
+      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>
+        Active Query Pipeline Ledger ({filteredDoubts.length})
+      </Typography>
 
-                          {d.assignedFacultyName && (
-                            <Typography variant="caption" sx={{ mt: 1, display: "block", color: 'text.secondary' }}>
-                                Assigned To: **{d.assignedFacultyName}** </Typography>
-                          )}
-                          
-                          {d.status === "scheduled" && d.scheduleSlot && (
-                            <Typography variant="caption" color="primary.dark" fontWeight={600} mt={0.5}>
-                                Meeting Scheduled: {d.scheduleSlot.day} at {d.scheduleSlot.time} ({d.scheduleSlot.location}) - Tap to see details.
-                            </Typography>
-                          )}
-
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </Stack>
-                )}
+      <Stack spacing={2}>
+        {filteredDoubts.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: "center", bgcolor: "rgba(0,0,0,0.1)", borderRadius: 3, border: "1px dashed rgba(255,255,255,0.05)" }}>
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.3)" }}>No matching inquiries found in active pipeline registers.</Typography>
+          </Box>
+        ) : (
+          filteredDoubts.map((issue) => (
+            <Card key={issue.id} sx={{ bgcolor: "rgba(25, 27, 28, 0.6)", border: "1px solid rgba(255, 255, 255, 0.05)", borderRadius: 2.5, color: "white" }}>
+              <CardContent sx={{ p: 2.5 }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
+                  <Typography variant="body1" fontWeight={700} color="#e2e2e4">{issue.title}</Typography>
+                  <Chip 
+                    label={issue.status.toUpperCase()} 
+                    size="small"
+                    sx={{
+                      bgcolor: issue.status === "pending" ? "rgba(255, 183, 77, 0.12)" : "rgba(76, 175, 80, 0.12)",
+                      color: issue.status === "pending" ? "#ffb74d" : "#4caf50",
+                      fontWeight: 800,
+                      fontSize: "0.72rem",
+                      borderRadius: 1
+                    }}
+                  />
+                </Box>
+                <Typography variant="body2" sx={{ color: "#c6c5d7", opacity: 0.85, mb: 2 }}>{issue.description}</Typography>
+                <Divider sx={{ borderColor: "rgba(255,255,255,0.05)", mb: 1.5 }} />
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.4)" }}>
+                    Assigned Faculty Identifier: <span style={{ color: "#c0c1ff", fontFamily: "monospace" }}>{issue.assignedFacultyId}</span>
+                  </Typography>
+                </Box>
               </CardContent>
             </Card>
-            
-            {/* ROW 3: YOUR APPOINTMENT HISTORY */}
-            <Card sx={{ boxShadow: 2 }}>
-              <CardContent>
-                <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <HistoryIcon sx={{ mr: 1 }} />
-                    Your Appointment History
-                </Typography>
-                
-                {myAppointments.length === 0 ? (
-                  <Alert severity="info">You have not requested any appointments yet.</Alert>
-                ) : (
-                  <Stack spacing={2}>
-                    {myAppointments.map((a) => (
-                      <Card key={a.id} variant="outlined">
-                        <CardContent>
-                          <Stack direction="row" justifyContent="space-between" alignItems="center">
-                            <Typography variant="h6" color="primary.dark" sx={{ fontSize: '1.1rem' }}>
-                              {a.facultyName || 'Faculty Member'}
-                            </Typography>
-                            <Chip
-                              label={a.status.toUpperCase()}
-                              color={a.status === "accepted" ? "success" : (a.status === "rejected" ? "error" : "warning")}
-                              size="small"
-                            />
-                          </Stack>
+          ))
+        )}
+      </Stack>
 
-                          <Typography sx={{ mt: 0.5 }}>
-                            Reason: {a.reason}
-                          </Typography>
+      {/* --- INTEGRATED ASSIGNMENT CHANNELS DIALOG DIALOG OVERLAY (Refactored Blueprint) --- */}
+      <Dialog 
+        open={assignDialogOpen} 
+        onClose={() => setAssignDialogOpen(false)}
+        PaperProps={{
+          sx: { bgcolor: "#1a1c1d", color: "white", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", width: "100%", maxWidth: 500 }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          Top Expert Recommendations
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2, p: 3 }}>
+          <Typography variant="body2" sx={{ color: "#c6c5d7", mb: 2.5 }}>
+            The text engine matches the highest overlapping expertise tags. Select your preferred professor below to route the ticket:
+          </Typography>
 
-                          {a.slot && (
-                            <Typography variant="caption" color="text.secondary" fontWeight={600} mt={0.5}>
-                                Slot: {a.slot.day} at {a.slot.start} - {a.slot.end}
-                            </Typography>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </Stack>
-                )}
-              </CardContent>
-            </Card>
-        </Box> {/* End of Main Content Area */}
-        
-      </Box> {/* End of Sidebar/Content Container */}
-      
-      {/* Existing Dialogs (Global Scope) */}
-      <FindFacultyDialog
-        open={openFind}
-        onClose={() => setOpenFind(false)}
-      />
-      
-      {selectedDoubt && (
-          <DoubtResolutionDialog
-              open={openResolution}
-              onClose={() => setOpenResolution(false)}
-              doubt={selectedDoubt}
-              isFaculty={false}
-          />
-      )}
-    </Layout>
+          <Stack spacing={2}>
+            {matchedFacultyPool.map((f) => {
+              const isSelected = f.id === selectedFacultyId;
+              return (
+                <Card
+                  key={f.id}
+                  onClick={() => setSelectedFacultyId(f.id)}
+                  sx={{
+                    cursor: "pointer",
+                    bgcolor: isSelected ? "rgba(192, 193, 255, 0.12)" : "rgba(255,255,255,0.02)",
+                    border: isSelected ? "1px solid #c0c1ff" : "1px solid rgba(255,255,255,0.06)",
+                    color: "white",
+                    borderRadius: 2.5,
+                    transition: "all 0.2s ease"
+                  }}
+                >
+                  <CardContent sx={{ p: 2 }}>
+                    <Typography variant="body1" fontWeight={700} color={isSelected ? "#c0c1ff" : "white"}>
+                      {f.name}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mt: 0.5 }}>
+                      Department Branch: {f.department} | SAP ID: <span style={{ fontFamily: "monospace" }}>{f.id}</span>
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: "#ffb0ce", display: "block", mt: 0.5, fontWeight: 600 }}>
+                      Overlap Keywords Matched: {f.matchedExpertise || "None (General)"}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <Button onClick={() => setAssignDialogOpen(false)} color="error" sx={{ textTransform: "none", fontWeight: 600 }}>Cancel</Button>
+          <Button 
+            onClick={finalizeDoubtAssignment} 
+            variant="contained" 
+            color="secondary" 
+            disabled={!selectedFacultyId}
+            sx={{ textTransform: "none", fontWeight: 700, px: 3, borderRadius: 2 }}
+          >
+            Assign Query Token
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 };
 

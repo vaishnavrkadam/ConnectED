@@ -12,6 +12,7 @@ import {
 // Import assets
 import collegeBg from "./assets/college-bg-entr.jpg"; // Assuming you have this path
 import collegeLogo from "./assets/college-logo.png"; // Assuming you have this path
+import Register from "./pages/Register";
 
 import Layout from "./components/Layout";
 import QuestionAnswerIcon from "@mui/icons-material/QuestionAnswer";

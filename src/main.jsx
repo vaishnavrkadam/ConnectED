@@ -31,11 +31,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             
             {/* SECURE DASHBOARD ROUTES */}
             <Route 
-              path="/student" 
+              path="/student-dashboard" 
               element={<ProtectedRoute allowedRoles={['student']}><StudentDashboard /></ProtectedRoute>} 
             />
             <Route 
-              path="/faculty" 
+              path="/faculty-dashboard" 
               element={<ProtectedRoute allowedRoles={['faculty']}><FacultyDashboard /></ProtectedRoute>} 
             />
             
