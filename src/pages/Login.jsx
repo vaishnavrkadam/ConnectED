@@ -149,7 +149,7 @@ const Login = () => {
       sx={{
         minHeight: "100vh",
         // Translucent glow overlay structure matching layout assets
-        backgroundImage: `linear-gradient(rgba(0,0,0,0.72), rgba(0,0,0,0.72)), url(${collegeBg})`,
+        backgroundImage: `linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), url(${collegeBg})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         display: "flex",

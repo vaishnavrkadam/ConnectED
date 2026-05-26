@@ -25,8 +25,9 @@ import {
   DialogContent,
   DialogActions,
   useTheme
+  
 } from "@mui/material";
-import { collection, query, where, onSnapshot, orderBy, getDocs, addDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, orderBy, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
 // Sidebar & General Icons
@@ -42,6 +43,7 @@ import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchIcon from "@mui/icons-material/Search";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import HubIcon from "@mui/icons-material/Hub";
+import DoubtResolutionDialog from "../components/DoubtResolutionDialog";
 
 import collegeBg from "../assets/college-bg-entr.jpg";
 
@@ -417,6 +419,8 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
   const [historicalDoubts, setHistoricalDoubts] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [feedback, setFeedback] = useState({ type: "", msg: "" });
+  const [openChat, setOpenChat] = useState(false);
+  const [selectedDoubt, setSelectedDoubt] = useState(null);
 
   // Intelligent Assignment Dialog States Sourced from FacultyAssignmentDialog Blueprint
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
@@ -426,11 +430,14 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
 
   // REALTIME REAL-TIME ACTION LISTENER SYNC ENGINE
   useEffect(() => {
+    if (!studentUsn) return;
+
     const doubtsRef = collection(db, "doubts");
+    
+    // FIX: Removed server-side orderBy to bypass the manual Firestore composite index requirement
     const q = query(
       doubtsRef,
-      where("studentUsn", "==", studentUsn),
-      orderBy("createdAt", "desc")
+      where("studentUsn", "==", studentUsn)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -438,6 +445,14 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
       snapshot.forEach((doc) => {
         issues.push({ id: doc.id, ...doc.data() });
       });
+
+      // Sort in-memory safely to correctly process both Firestore server timestamps and local cache values
+      issues.sort((a, b) => {
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return timeB - timeA; // Descending order: Newest doubts appear at the top
+      });
+
       setHistoricalDoubts(issues);
     }, (error) => {
       console.error("Pipeline breakdown:", error);
@@ -460,6 +475,7 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
     setAnalyzingPool(true);
 
     try {
+      // Clean and normalize incoming string input to parse words safely
       const cleanKeywords = promptText
         .toLowerCase()
         .replace(/[^a-zA-Z0-9\s]/g, "")
@@ -468,21 +484,24 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
 
       const uniqueKeywords = Array.from(new Set(cleanKeywords));
       
+      // Query the primary 'faculty' master collection as verified in your database setup
       const facultySnapshot = await getDocs(collection(db, "faculty"));
       const scoringMatrix = [];
 
       facultySnapshot.forEach((doc) => {
         const fac = doc.data();
+        const facultySapId = doc.id; // The document ID is the alphanumeric SAP ID (e.g. "5544")
+
         if (fac.expertise && Array.isArray(fac.expertise)) {
-          // Count keyword intersection metrics
+          // Verify if any keyword from the prompt matches the faculty's expertise array tokens
           const matches = fac.expertise.filter((skill) => 
-            uniqueKeywords.includes(skill.toLowerCase().trim())
+            uniqueKeywords.some(keyword => skill.toLowerCase().trim().includes(keyword))
           );
           
           if (matches.length > 0) {
             scoringMatrix.push({
-              id: doc.id,
-              name: fac.name,
+              id: facultySapId, // Evaluated to the exact SAP ID for seamless conditional dashboard triggers
+              name: fac.name || "Faculty Member",
               department: fac.department || "General Academics",
               score: matches.length,
               matchedExpertise: matches.join(", ")
@@ -491,15 +510,15 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
         }
       });
 
-      // Sort by score and take the top 4 matched entries
+      // Sort by absolute highest score descending to surface best recommendations first
       const topMatches = scoringMatrix
         .sort((a, b) => b.score - a.score)
         .slice(0, 4);
 
-      // Fallback default routing option if keyword mapping yielded nothing
-      if (topMatches.length === 0 && counsellorSapId) {
+      // Secure institutional counselor fallback configuration if keyword scanning yielded an empty matrix
+      if (topMatches.length === 0) {
         topMatches.push({
-          id: counsellorSapId,
+          id: counsellorSapId || "8858",
           name: "Academic Counselor (Default Router)",
           department: "Department Hub",
           score: 0,
@@ -512,7 +531,7 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
       setAssignDialogOpen(true);
 
     } catch (err) {
-      console.error(err);
+      console.error("Match Matrix Processing Failure:", err);
       setFeedback({ type: "error", msg: "Expertise mapping arrays analysis failure." });
     } finally {
       setAnalyzingPool(false);
@@ -520,6 +539,7 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
   };
 
   // Writes the final query payload using the chosen professor's SAP ID
+// Writes the final query payload using the chosen professor's SAP ID
   const finalizeDoubtAssignment = async () => {
     if (!selectedFacultyId) return;
     setAnalyzingPool(true);
@@ -533,35 +553,47 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
         .filter((word) => word.length > 2);
 
       const headerExcerpt = promptText.split(/[.!?]/)[0].substring(0, 55) + "...";
+      
+      // Look up the selected choice from our matched recommendation pool to safely assign its metadata details
+      const chosenFaculty = matchedFacultyPool.find(f => f.id === selectedFacultyId);
 
+      // This object structure directly matches what FacultyDashboard expects to receive
       await addDoc(collection(db, "doubts"), {
-        studentUsn: studentUsn,
+        // Core tracking fields mapped directly to your database keys
+        studentUsn: studentUsn, 
         studentName: studentName,
         title: headerExcerpt,
         description: promptText,
         searchKeywords: Array.from(new Set(cleanKeywords)),
-        assignedFacultyId: selectedFacultyId, // Dynamic value based on choice selection
-        status: "pending",
+        
+        // Setup dual alignment mapping keys matching your FacultyDashboard queries perfectly
+        assignedFacultyId: selectedFacultyId, // Populates with the Faculty's real SAP ID (e.g. "5544")
+        assignedFacultyName: chosenFaculty ? chosenFaculty.name : "Faculty Member",
+        
+        // Extract the upper-cased matched subject skill tag so FacultyDashboard doesn't render empty fields
+        subject: chosenFaculty && chosenFaculty.score > 0 ? chosenFaculty.matchedExpertise.split(", ")[0].toUpperCase() : "GENERAL / NO MATCH",
+        
+        status: "assigned", // Set directly to 'assigned' to route smoothly into the teacher's dashboard queue
         rejectedBy: [],
         createdAt: serverTimestamp(),
         resolvedAt: null,
         solutionSummary: null
       });
 
-      setFeedback({ type: "success", msg: `Doubt successfully locked and routed to Faculty ID: [${selectedFacultyId}]` });
+      setFeedback({ type: "success", msg: `Doubt successfully locked and routed to ${chosenFaculty?.name || 'Selected Faculty'}!` });
       setSingleDoubtInput("");
       setAssignDialogOpen(false);
     } catch (err) {
-      console.error(err);
-      setFeedback({ type: "error", msg: "Failed to dispatch database write." });
-    } {
+      console.error("Database tracking dispatch error:", err);
+      setFeedback({ type: "error", msg: `Failed to dispatch database write: ${err.message}` });
+    } finally {
       setAnalyzingPool(false);
     }
   };
 
   const filteredDoubts = historicalDoubts.filter(item => 
-    item.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    item.title.toLowerCase().includes(searchQuery.toLowerCase())
+    (item.description || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (item.title || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -651,7 +683,22 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
           </Box>
         ) : (
           filteredDoubts.map((issue) => (
-            <Card key={issue.id} sx={{ bgcolor: "rgba(25, 27, 28, 0.6)", border: "1px solid rgba(255, 255, 255, 0.05)", borderRadius: 2.5, color: "white" }}>
+            <Card 
+              key={issue.id} 
+              onClick={() => {
+                setSelectedDoubt(issue);
+                setOpenChat(true);
+              }}
+              sx={{ 
+                bgcolor: "rgba(25, 27, 28, 0.6)", 
+                border: "1px solid rgba(255, 255, 255, 0.05)", 
+                borderRadius: 2.5, 
+                color: "white",
+                cursor: "pointer", // Added pointer feedback cursor smoothly
+                transition: "0.2s",
+                "&:hover": { transform: "translateY(-2px)", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }
+              }}
+            >
               <CardContent sx={{ p: 2.5 }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
                   <Typography variant="body1" fontWeight={700} color="#e2e2e4">{issue.title}</Typography>
@@ -741,6 +788,14 @@ const DoubtResolutionPortal = ({ studentUsn, studentName, counsellorSapId, onBac
           </Button>
         </DialogActions>
       </Dialog>
+      {selectedDoubt && (
+        <DoubtResolutionDialog
+          open={openChat}
+          onClose={() => setOpenChat(false)}
+          doubt={selectedDoubt}
+          isFaculty={false}
+        />
+      )}
     </Box>
   );
 };
