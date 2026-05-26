@@ -44,7 +44,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import HubIcon from "@mui/icons-material/Hub";
 import DoubtResolutionDialog from "../components/DoubtResolutionDialog";
-
+import ClubOperationsPortal from "../components/ClubOperationsPortal";
 import collegeBg from "../assets/college-bg-entr.jpg";
 
 const StudentDashboard = () => {
@@ -58,15 +58,61 @@ const StudentDashboard = () => {
   const [facultyModalOpen, setFacultyModalOpen] = useState(false);
   const [matchingFaculty, setMatchingFaculty] = useState([]);
 
-  const studentData = extendedProfile || {
+  
+
+  const usnIdentifier = profile?.primaryId || "USN Unassigned";
+
+  // --- LIVE ACTIVITY POINTS CALCULATOR ENGINE ---
+  const [activityPoints, setActivityPoints] = useState({ approved: 0, pending: 0 });
+
+  useEffect(() => {
+    if (!usnIdentifier || usnIdentifier === "USN Unassigned") return;
+
+    const reqsRef = collection(db, "club_requests");
+    // Listens to all requests in real-time
+    const unsubscribe = onSnapshot(reqsRef, (snapshot) => {
+      let approvedSum = 0;
+      let pendingSum = 0;
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        
+        // Check if the student is a participant in this request
+        if (data.participants && Array.isArray(data.participants)) {
+          const participantRow = data.participants.find(
+            (p) => p.usn.toUpperCase() === usnIdentifier.toUpperCase()
+          );
+
+          if (participantRow) {
+            const pointsValue = parseFloat(participantRow.points) || 0;
+
+            if (data.status === "approved") {
+              approvedSum += pointsValue;
+            } else if (data.status === "pending_coordinator" || data.status === "pending_dean") {
+              pendingSum += pointsValue;
+            }
+          }
+        }
+      });
+
+      setActivityPoints({ approved: approvedSum, pending: pendingSum });
+    });
+
+    return () => unsubscribe();
+  }, [usnIdentifier]);
+
+  // Mix live points into your existing layout parameters safely
+  const studentData = extendedProfile ? {
+    ...extendedProfile,
+    name: profile?.name || "Verified Student",
+    activityPointsSummary: { approvedPoints: activityPoints.approved, pendingPoints: activityPoints.pending }
+  } : {
     name: profile?.name || "Verified Student",
     branch: "Loading...",
     semester: "-",
     section: "-",
-    activityPointsSummary: { approvedPoints: 0, pendingPoints: 0 }
+    activityPointsSummary: { approvedPoints: activityPoints.approved, pendingPoints: activityPoints.pending }
   };
-
-  const usnIdentifier = profile?.primaryId || "USN Unassigned";
 
   // Aggregate a live unique deduplicated array of all faculty expertise fields
   useEffect(() => {
@@ -366,15 +412,21 @@ const StudentDashboard = () => {
             onBack={() => setActiveTab("overview")}
           />
         )}
+        {/* VIEW 3: FULL WIDTH CLUB OPERATIONS WORKSPACE CONSOLE ROUTE TARGET */}
+        {activeTab === "clubs" && (
+          <ClubOperationsPortal
+            studentUsn={usnIdentifier}
+            studentName={studentData.name}
+            onBack={() => setActiveTab("overview")}
+          />
+        )}
+
 
         {/* OTHER FALLBACK TARGET MODULES */}
         {activeTab !== "overview" && activeTab !== "doubts" && (
           <Box>
             <Button startIcon={<ArrowBackIcon />} onClick={() => setActiveTab("overview")} sx={{ color: "#c0c1ff", mb: 3, textTransform: "none" }}>Back to Overview</Button>
-            <Card sx={{ bgcolor: "rgba(25, 28, 29, 0.5)", backdropFilter: "blur(25px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", p: 4, textAlign: "center" }}>
-              <Typography variant="h6" fontWeight={700}>{activeTab.toUpperCase()} Module Workspace</Typography>
-              <Typography variant="body2" sx={{ color: "#c6c5d7", opacity: 0.7, mt: 1 }}>Component system initializing.</Typography>
-            </Card>
+            
           </Box>
         )}
       </Box>
