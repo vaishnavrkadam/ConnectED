@@ -43,14 +43,17 @@ import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchIcon from "@mui/icons-material/Search";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import HubIcon from "@mui/icons-material/Hub";
+import CampaignIcon from "@mui/icons-material/Campaign"; // Added for Global Bulletins
 import DoubtResolutionDialog from "../components/DoubtResolutionDialog";
 import ClubOperationsPortal from "../components/ClubOperationsPortal";
+// import DoubtResolutionPortal from "../components/DoubtResolutionPortal"; // Commented out to prevent crash: component is defined at the bottom of this file
 import collegeBg from "../assets/college-bg-entr.jpg";
 
 const StudentDashboard = () => {
   const { profile, extendedProfile, signOut } = useAuth();
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState("overview");
+  
 
   // Sidebar Expertise Explorer State Elements
   const [globalExpertiseList, setGlobalExpertiseList] = useState([]);
@@ -61,6 +64,19 @@ const StudentDashboard = () => {
   
 
   const usnIdentifier = profile?.primaryId || "USN Unassigned";
+
+  // --- LIVE GLOBAL ANNOUNCEMENTS ENGINE ---
+  const [globalBulletins, setGlobalBulletins] = useState([]);
+
+  // --- LISTEN TO GLOBAL BROADCASTS ---
+  useEffect(() => {
+    const unsubGlobal = onSnapshot(collection(db, "global_announcements"), (snapshot) => {
+      const buffer = [];
+      snapshot.forEach(d => buffer.push(d.data()));
+      setGlobalBulletins(buffer.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
+    });
+    return () => unsubGlobal();
+  }, []);
 
   // --- LIVE ACTIVITY POINTS CALCULATOR ENGINE ---
   const [activityPoints, setActivityPoints] = useState({ approved: 0, pending: 0 });
@@ -329,6 +345,34 @@ const StudentDashboard = () => {
               />
             </Box>
 
+            {/* --- GLOBAL ADMINISTRATIVE BULLETINS DISPLAY --- */}
+            {globalBulletins.length > 0 && (
+              <Stack spacing={2} sx={{ mb: 4 }}>
+                {globalBulletins.map((bulletin, idx) => (
+                  <Alert 
+                    key={idx} 
+                    severity="warning" 
+                    icon={<CampaignIcon />}
+                    sx={{ 
+                      bgcolor: "rgba(245, 158, 11, 0.12)", 
+                      color: "#fbbf24", 
+                      border: "1px solid rgba(245, 158, 11, 0.25)",
+                      borderRadius: 3,
+                      "& .MuiAlert-message": { width: "100%" }
+                    }}
+                  >
+                    <Typography variant="subtitle2" fontWeight={800}>{bulletin.title}</Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mt: 0.5, opacity: 0.9 }}>
+                      {bulletin.content}
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: "block", mt: 1, opacity: 0.5, textAlign: "right" }}>
+                      Issued by: {bulletin.postedBy}
+                    </Typography>
+                  </Alert>
+                ))}
+              </Stack>
+            )}
+
             <Grid container spacing={3.5}>
               <Grid item xs={12} lg={4}>
                 <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.5)", backdropFilter: "blur(20px)", borderRadius: 4, border: "1px solid rgba(255, 255, 255, 0.1)", color: "white" }}>
@@ -423,7 +467,7 @@ const StudentDashboard = () => {
 
 
         {/* OTHER FALLBACK TARGET MODULES */}
-        {activeTab !== "overview" && activeTab !== "doubts" && (
+        {activeTab !== "overview" && activeTab !== "doubts" && activeTab !== "clubs" && (
           <Box>
             <Button startIcon={<ArrowBackIcon />} onClick={() => setActiveTab("overview")} sx={{ color: "#c0c1ff", mb: 3, textTransform: "none" }}>Back to Overview</Button>
             

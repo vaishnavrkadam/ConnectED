@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -17,45 +17,81 @@ import {
   TableRow,
   Paper,
   Chip,
-  Alert
+  Alert,
+  TextField
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
-const ClubRequestDetailDialog = ({ open, onClose, request, isFaculty }) => {
+// src/components/ClubRequestDetailDialog.jsx - Status Modifier Modification
+const ClubRequestDetailDialog = ({ open, onClose, request, isFaculty, isDeanView }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [editableParticipants, setEditableParticipants] = useState([]);
+
+  useEffect(() => {
+    if (request?.participants) {
+      setEditableParticipants(JSON.parse(JSON.stringify(request.participants)));
+    }
+  }, [request]);
 
   if (!request) return null;
 
-  const handleUpdateStatus = async (newStatus) => {
+  const handlePointsChange = (index, value) => {
+    const updated = [...editableParticipants];
+    updated[index].points = value;
+    setEditableParticipants(updated);
+  };
+
+  const handleUpdateStatus = async (actionType) => {
     setLoading(true);
     setError("");
     try {
-      const updatePayload = { status: newStatus };
+      const requestDocRef = doc(db, "club_requests", request.id);
       
-      if (newStatus === "approved") {
-        updatePayload["coordinatorApproval"] = { status: "approved", updatedAt: new Date().toISOString() };
-        // Simulating auto-dean approval or transitioning directly to approved state safely
-        updatePayload.status = "approved"; 
-      } else if (newStatus === "rejected") {
-        updatePayload["coordinatorApproval"] = { status: "rejected", updatedAt: new Date().toISOString() };
-        updatePayload.status = "rejected";
+      if (actionType === "reject") {
+        await updateDoc(requestDocRef, {
+          status: "rejected",
+          [isDeanView ? "deanApproval.status" : "coordinatorApproval.status"]: "rejected",
+          [isDeanView ? "deanApproval.updatedAt" : "coordinatorApproval.updatedAt"]: new Date().toISOString()
+        });
+        onClose();
+        return;
       }
 
-      await updateDoc(doc(db, "club_requests", request.id), updatePayload);
+      // If the current reviewer is the Dean, final clearance criteria is reached
+      if (isDeanView || request.status === "pending_dean") {
+        await updateDoc(requestDocRef, {
+          status: "approved", // Triggers dynamic point compilation engine on Student Overviews instantly
+          participants: editableParticipants,
+          "deanApproval.status": "approved",
+          "deanApproval.updatedAt": new Date().toISOString()
+        });
+      } else {
+        // Fallback context routing behavior matching standard Coordinator flows
+        await updateDoc(requestDocRef, {
+          status: "pending_dean",
+          participants: editableParticipants,
+          "coordinatorApproval.status": "approved",
+          "coordinatorApproval.updatedAt": new Date().toISOString()
+        });
+      }
+
       onClose();
     } catch (err) {
       console.error(err);
-      setError("Failed to update request status.");
+      setError("Failed to update status parameters.");
     } finally {
       setLoading(false);
     }
   };
 
-  const showActionButtons = isFaculty && request.status === "pending_coordinator";
+  // Determine button state visibility criteria
+  const showActionControls = isFaculty && (request.status === "pending_coordinator" || (isDeanView && request.status === "pending_dean"));
+
+  // ... (Keep existing layout return templates, tables, and buttons exactly identical)
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" PaperProps={{ sx: { bgcolor: '#0f172a', color: 'white', borderRadius: 4 } }}>
@@ -83,29 +119,51 @@ const ClubRequestDetailDialog = ({ open, onClose, request, isFaculty }) => {
               <Typography variant="body2" fontWeight={600}>{request.toDate}</Typography>
             </Box>
             <Box>
-              <Typography variant="caption" color="textSecondary" display="block">CLAIM SCOPE</Typography>
+              <Typography variant="caption" color="textSecondary" display="block">CLAIM CATEGORY</Typography>
               <Typography variant="body2" fontWeight={600} color="secondary.main">{request.requestType?.toUpperCase()}</Typography>
             </Box>
           </Stack>
 
           <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />
           
-          <Typography variant="subtitle2" fontWeight={700}>Participant Line Rows:</Typography>
-          <TableContainer component={Paper} sx={{ bgcolor: 'rgba(0,0,0,0.2)', maxHeight: 180 }}>
+          <Typography variant="subtitle2" fontWeight={700}>
+            {showActionControls ? "Review & Adjust Activity Points Row Entry:" : "Participant Line Rows:"}
+          </Typography>
+
+          <TableContainer component={Paper} sx={{ bgcolor: 'rgba(0,0,0,0.2)', maxHeight: 200 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow sx={{ "& th": { bgcolor: '#1e293b', color: 'white', borderBottom: '1px solid #334155' } }}>
                   <TableCell>USN</TableCell>
                   <TableCell>Name</TableCell>
-                  <TableCell align="right">Points</TableCell>
+                  <TableCell align="right" sx={{ pr: 3 }}>Points</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {request.participants?.map((p, idx) => (
+                {editableParticipants.map((p, idx) => (
                   <TableRow key={idx} sx={{ "& td": { color: '#cbd5e1', borderBottom: '1px solid rgba(255,255,255,0.04)' } }}>
                     <TableCell sx={{ fontFamily: 'monospace' }}>{p.usn}</TableCell>
                     <TableCell>{p.name}</TableCell>
-                    <TableCell align="right">{p.points || "-"}</TableCell>
+                    <TableCell align="right">
+                      {showActionControls && request.requestType !== "attendance" ? (
+                        <TextField
+                          type="number"
+                          size="small"
+                          value={p.points}
+                          onChange={(e) => handlePointsChange(idx, e.target.value)}
+                          inputProps={{ style: { color: 'white', textAlign: 'right', padding: '4px 8px' } }}
+                          sx={{
+                            width: 80,
+                            '& .MuiOutlinedInput-root': {
+                              bgcolor: 'rgba(255,255,255,0.05)',
+                              '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' }
+                            }
+                          }}
+                        />
+                      ) : (
+                        <Typography variant="body2" sx={{ pr: 2 }}>{p.points || "-"}</Typography>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -114,8 +172,22 @@ const ClubRequestDetailDialog = ({ open, onClose, request, isFaculty }) => {
 
           {request.proofUrl && (
             <Box sx={{ mt: 1 }}>
-              <Typography variant="caption" color="textSecondary" display="block" mb={1}>BOUND PROOF DOCUMENTATION FILE:</Typography>
-              <Box component="img" src={request.proofUrl} sx={{ maxWidth: '100%', maxHeight: 200, borderRadius: 2, border: '1px solid rgba(255,255,255,0.08)' }} />
+              <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1 }}>
+                BOUND PROOF DOCUMENTATION FILE:
+              </Typography>
+              <Box 
+                component="img" 
+                // Supports base64 data strings and direct web hyperlink strings natively
+                src={request.proofUrl.startsWith("http") || request.proofUrl.startsWith("data:") ? request.proofUrl : null} 
+                sx={{ 
+                  width: '100%', 
+                  maxHeight: '60vh', 
+                  borderRadius: 2, 
+                  objectFit: 'contain',
+                  bgcolor: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid rgba(255,255,255,0.08)' 
+                }} 
+              />
             </Box>
           )}
         </Stack>
@@ -123,10 +195,10 @@ const ClubRequestDetailDialog = ({ open, onClose, request, isFaculty }) => {
 
       <DialogActions sx={{ p: 2.5, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         <Button onClick={onClose} variant="outlined" color="inherit" disabled={loading} sx={{ textTransform: 'none' }}>Close View</Button>
-        {showActionButtons && (
+        {showActionControls && (
           <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
-            <Button startIcon={<CancelIcon />} variant="contained" color="error" disabled={loading} onClick={() => handleUpdateStatus("rejected")} sx={{ textTransform: 'none' }}>Reject</Button>
-            <Button startIcon={<CheckCircleIcon />} variant="contained" color="success" disabled={loading} onClick={() => handleUpdateStatus("approved")} sx={{ textTransform: 'none' }}>Approve Claims</Button>
+            <Button startIcon={<CancelIcon />} variant="contained" color="error" disabled={loading} onClick={() => handleUpdateStatus("reject")} sx={{ textTransform: 'none' }}>Reject Request</Button>
+            <Button startIcon={<CheckCircleIcon />} variant="contained" color="success" disabled={loading} onClick={() => handleUpdateStatus("approve")} sx={{ textTransform: 'none' }}>Approve & Route to Dean</Button>
           </Stack>
         )}
       </DialogActions>

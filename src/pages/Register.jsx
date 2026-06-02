@@ -41,35 +41,45 @@ const Register = () => {
     setLoading(true);
 
     const cleanId = primaryId.trim().toUpperCase();
-    const targetCollection = role === "student" ? "students" : "faculty";
-
+    
     try {
-      // 1. Pre-Verification Layer check
-      const docRef = doc(db, targetCollection, cleanId);
-      const docSnap = await getDoc(docRef);
+      let isWhitelisted = false;
+      let verifiedRole = role;
+      let backendData = {};
 
-      if (!docSnap.exists()) {
-        throw new Error(
-          `Verification Failed: ${role === "student" ? "USN" : "SAP ID"} [${cleanId}] is not whitelisted by administration.`
-        );
-      }
+      // ---- INTERCEPT DEAN REGISTRATION BYPASS EXPLICITLY ----
+      if (cleanId === "SAGARBM@RVCE.EDU.IN") {
+        isWhitelisted = true;
+        verifiedRole = "dean";
+        backendData = { name: "Dr. Sagar B M" };
+      } else {
+        // ---- STANDARD REGISTRATION FIREWALL MANIFESTS ----
+        const targetCollection = role === "student" ? "students" : "faculty"; 
+        const docRef = doc(db, targetCollection, cleanId);
+        const docSnap = await getDoc(docRef);
 
-      const backendData = docSnap.data();
+        if (!docSnap.exists()) {
+          throw new Error(
+            `Verification Failed: ${role === "student" ? "USN" : "SAP ID"} [${cleanId}] is not whitelisted by administration.`
+          );
+        }
 
-      // 2. Structural Email verification mapping
-      if (role === "student" && backendData.emails && backendData.emails.length > 0) {
-        const emailAllowed = backendData.emails.some(
-          (e) => e.toLowerCase() === email.trim().toLowerCase()
-        );
-        if (!emailAllowed) {
-          throw new Error("Registration email does not match institutional records allocated to this USN.");
+        backendData = docSnap.data();
+        isWhitelisted = true;
+
+        // Structural Email verification mapping
+        if (role === "student" && backendData.emails && backendData.emails.length > 0) {
+          const emailAllowed = backendData.emails.some(
+            (e) => e.toLowerCase() === email.trim().toLowerCase()
+          );
+          if (!emailAllowed) {
+            throw new Error("Registration email does not match institutional records allocated to this USN.");
+          }
         }
       }
 
       // 3. Create Firebase User Identity safely
       const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      
-      // ✅ FIX: Sourced directly from userCredential.user without double indexing
       const firebaseUid = userCredential.user.uid; 
 
       // 4. Set global routing role context
@@ -77,18 +87,25 @@ const Register = () => {
         uid: firebaseUid,
         email: email.trim().toLowerCase(),
         name: backendData.name,
-        role: role,
+        role: verifiedRole, // Saves 'dean', 'faculty', or 'student' cleanly to context fields
         primaryId: cleanId,
         createdAt: serverTimestamp()
       });
 
-      // 5. Establish dual-binding link to institutional master records
-      await updateDoc(doc(db, targetCollection, cleanId), {
-        uid: firebaseUid
-      });
+      // 5. Establish dual-binding link to institutional master records if standard accounts are processed
+      if (verifiedRole !== "dean") {
+        const targetCollection = role === "student" ? "students" : "faculty";     
+        await updateDoc(doc(db, targetCollection, cleanId), {
+          uid: firebaseUid
+        });
+      }
 
-      // Secure redirection to dashboard workspace
-      navigate(role === "student" ? "/student-dashboard" : "/faculty-dashboard");
+      // Secure redirection to corresponding isolated dashboard workspaces
+      if (verifiedRole === "dean") {
+        navigate("/dean-dashboard");
+      } else {
+        navigate(verifiedRole === "student" ? "/student-dashboard" : "/faculty-dashboard");
+      }
 
     } catch (err) {
       console.error("Registration Error System:", err);

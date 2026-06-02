@@ -8,16 +8,9 @@ import App from "./App";
 import Login from "./pages/Login";
 import StudentDashboard from "./pages/StudentDashboard";
 import FacultyDashboard from "./pages/FacultyDashboard";
-
-// src/main.jsx
-// ... existing imports ...
-import { AuthProvider } from "./context/AuthContext"; // Import the new provider
-// src/main.jsx
-
-// ... existing imports ...
-import ProtectedRoute from "./components/ProtectedRoute"; // <-- NEW IMPORT
-
-// ... (other imports) ...
+import DeanDashboard from "./pages/DeanDashboard"; // <-- NEW INDEPENDENT PORTAL IMPORT
+import { AuthProvider } from "./context/AuthContext"; 
+import ProtectedRoute from "./components/ProtectedRoute"; 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -37,6 +30,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route 
               path="/faculty-dashboard" 
               element={<ProtectedRoute allowedRoles={['faculty']}><FacultyDashboard /></ProtectedRoute>} 
+            />
+            <Route 
+              path="/dean-dashboard" 
+              element={<ProtectedRoute allowedRoles={['dean']}><DeanDashboard /></ProtectedRoute>} // <-- NEW SECURE AUTHORITY ROUTE
             />
             
             <Route path="*" element={<Navigate to="/" replace />} />

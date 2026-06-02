@@ -59,7 +59,6 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    setLoading(false);
     setLoading(true);
 
     if (authMode === "login") {
@@ -73,7 +72,15 @@ const Login = () => {
 
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          navigate(userData.role === "student" ? "/student-dashboard" : "/faculty-dashboard");
+          
+          // ---- REDIRECTION ROUTING MATRIX MATRIX ----
+          if (userData.role === "dean") {
+            navigate("/dean-dashboard");
+          } else if (userData.role === "faculty") {
+            navigate("/faculty-dashboard");
+          } else {
+            navigate("/student-dashboard");
+          }
         } else {
           throw new Error("Base configuration profile missing. Please re-register your identity.");
         }
@@ -86,54 +93,73 @@ const Login = () => {
     } else {
       // ---- CORE WHITELIST REGISTRATION WORKFLOW ----
       const cleanId = primaryId.trim().toUpperCase();
-      const targetCollection = role === "student" ? "students" : "faculty";
 
       try {
-        // 1. Pre-Verification Check against seeded administrative collections
-        const docRef = doc(db, targetCollection, cleanId);
-        const docSnap = await getDoc(docRef);
+        let isWhitelisted = false;
+        let verifiedRole = role;
+        let backendData = {};
 
-        if (!docSnap.exists()) {
-          throw new Error(
-            `Verification Blocked: ${role === "student" ? "USN" : "SAP ID"} [${cleanId}] is not whitelisted inside database registers.`
-          );
-        }
+        // 1. ABSOLUTE TOP-PRIORITY SECURITY FIREWALL BYPASS FOR DEAN REGISTRATION
+        if (cleanId === "SAGARBM@RVCE.EDU.IN") {
+          isWhitelisted = true;
+          verifiedRole = "dean";
+          backendData = { name: "Dr. Sagar B M" };
+        } else {
+          // ---- STANDARD WHITELIST PRE-VERIFICATION VALIDATION LAYER ----
+          const targetCollection = role === "student" ? "students" : "faculty";
+          const docRef = doc(db, targetCollection, cleanId);
+          const docSnap = await getDoc(docRef);
 
-        const backendData = docSnap.data();
+          if (!docSnap.exists()) {
+            throw new Error(
+              `Verification Blocked: ${role === "student" ? "USN" : "SAP ID"} [${cleanId}] is not whitelisted inside database registers.`
+            );
+          }
 
-        // 2. Validate email permissions if registering as a student
-        if (role === "student" && backendData.emails && backendData.emails.length > 0) {
-          const emailAllowed = backendData.emails.some(
-            (e) => e.toLowerCase() === email.trim().toLowerCase()
-          );
-          if (!emailAllowed) {
-            throw new Error("Target registration email does not match institutional records for this USN.");
+          backendData = docSnap.data();
+          isWhitelisted = true;
+
+          // Validate email verification mapping for general students
+          if (role === "student" && backendData.emails && backendData.emails.length > 0) {
+            const emailAllowed = backendData.emails.some(
+              (e) => e.toLowerCase() === email.trim().toLowerCase()
+            );
+            if (!emailAllowed) {
+              throw new Error("Target registration email does not match institutional records for this USN.");
+            }
           }
         }
 
-        // 3. Native Firebase Authentication invocation
+        // 2. Native Firebase Authentication invocation
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        
-        // ✅ Fixed: Safe singular property resolution extraction
         const firebaseUid = userCredential.user.uid;
 
-        // 4. Populate root identity profile database mapping
+        // 3. Populate root identity profile database mapping
         await setDoc(doc(db, "users", firebaseUid), {
           uid: firebaseUid,
           email: email.trim().toLowerCase(),
           name: backendData.name,
-          role: role,
+          role: verifiedRole, // Saves 'dean', 'faculty', or 'student' cleanly to global state profiles
           primaryId: cleanId,
           createdAt: serverTimestamp()
         });
 
-        // 5. Explicitly dual-bind structural master tables to auth UID
-        await updateDoc(doc(db, targetCollection, cleanId), {
-          uid: firebaseUid
-        });
+        // 4. Explicitly dual-bind structural master tables to auth UID (Skipped for custom Dean)
+        if (verifiedRole !== "dean") {
+          const targetCollection = role === "student" ? "students" : "faculty";
+          await updateDoc(doc(db, targetCollection, cleanId), {
+            uid: firebaseUid
+          });
+        }
 
-        // Direct workspace routing allocation switch
-        navigate(role === "student" ? "/student-dashboard" : "/faculty-dashboard");
+        // 5. Direct workspace routing allocation switch upon successful verification registration
+        if (verifiedRole === "dean") {
+          navigate("/dean-dashboard");
+        } else if (verifiedRole === "faculty") {
+          navigate("/faculty-dashboard");
+        } else {
+          navigate("/student-dashboard");
+        }
 
       } catch (err) {
         console.error("Verification System Failure:", err);
@@ -148,7 +174,6 @@ const Login = () => {
     <Box
       sx={{
         minHeight: "100vh",
-        // Translucent glow overlay structure matching layout assets
         backgroundImage: `linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), url(${collegeBg})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
@@ -163,7 +188,6 @@ const Login = () => {
         sx={{
           maxWidth: 460,
           width: "100%",
-          // Glassmorphic styling variables
           bgcolor: "rgba(25, 28, 29, 0.65)",
           backdropFilter: "blur(25px)",
           borderRadius: 4,
@@ -174,7 +198,6 @@ const Login = () => {
       >
         <CardContent sx={{ p: { xs: 3, sm: 4 }, textAlign: "center" }}>
           
-          {/* Institutional Header Component Setup */}
           <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 1.5, mb: 1 }}>
             <img 
               src={collegeLogo} 
@@ -199,7 +222,6 @@ const Login = () => {
           )}
   
           <form onSubmit={handleSubmit}>
-            {/* View Switching Selection Tab Block */}
             {authMode === "register" && (
               <ToggleButtonGroup
                 color="secondary"
@@ -223,7 +245,6 @@ const Login = () => {
               </ToggleButtonGroup>
             )}
 
-            {/* Render unique Identity Input only inside Registration parameters */}
             {authMode === "register" && (
               <TextField
                 label={role === "student" ? "University Seat Number (USN)" : "Faculty SAP ID"}
@@ -294,7 +315,7 @@ const Login = () => {
                 borderRadius: 2,
                 fontWeight: 700,
                 textTransform: "none",
-                bgcolor: theme.palette.secondary.main, // Sourced from global theme context variables
+                bgcolor: theme.palette.secondary.main,
                 "&:hover": {
                   bgcolor: theme.palette.secondary.dark,
                 }
@@ -310,7 +331,6 @@ const Login = () => {
             </Button>
           </form>
 
-          {/* Toggle Controls to flip between structures seamlessly */}
           <Box sx={{ mt: 3, display: "flex", flexDirection: "column", gap: 1, alignItems: "center" }}>
             {authMode === "login" ? (
               <Button

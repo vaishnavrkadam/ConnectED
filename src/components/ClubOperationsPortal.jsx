@@ -14,8 +14,14 @@ import {
   Grid,
   IconButton,
   List,
+  ListItem,
+  ListItemText,
   Paper,
-  Chip
+  Chip,
+  Dialog,
+  DialogContent,
+  DialogActions,
+  Avatar
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -26,6 +32,16 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import { db } from "../firebase";
 import { collection, query, where, onSnapshot, addDoc, doc, updateDoc } from "firebase/firestore";
 import ClubRequestDetailDialog from "./ClubRequestDetailDialog";
+
+// Universal Utility to normalize image data streams safely (Supports base64 & hyperlinks)
+const renderImageSource = (sourceString) => {
+  if (!sourceString) return null;
+  if (sourceString.startsWith("http") || sourceString.startsWith("data:")) {
+    return sourceString;
+  }
+  return null;
+};
+
 const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [myClubs, setMyClubs] = useState([]);
@@ -36,6 +52,14 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
   const [success, setSuccess] = useState("");
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [openRequestDetails, setOpenRequestDetails] = useState(false);
+
+  // Dialogue Popups Management
+  const [openAnnDialog, setOpenAnnDialog] = useState(false);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
+  const [viewedAnnouncements, setViewedAnnouncements] = useState(() => {
+    const saved = localStorage.getItem(`viewed_announcements_${studentUsn}`);
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // Claim Request Form Fields
   const [eventName, setEventName] = useState("");
@@ -51,10 +75,9 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
   const [annContent, setAnnContent] = useState("");
   const [annImageBase64, setAnnImageBase64] = useState("");
 
-  // 1. Dynamic Membership Scan Listener
   useEffect(() => {
     const clubsRef = collection(db, "clubs");
-    const unsubscribe = onSnapshot(clubsRef, (snapshot) => {
+    return onSnapshot(clubsRef, (snapshot) => {
       const managedPool = [];
       snapshot.forEach((docData) => {
         const data = docData.data();
@@ -66,22 +89,21 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
       setLoading(false);
       
       if (managedPool.length > 0 && !selectedClub) {
-        handleSelectClub(managedPool[0]);
+        setSelectedClub(managedPool[0]);
+        setIsPresident(managedPool[0].presidentUsn === studentUsn);
+        setParticipants([{ usn: studentUsn, name: studentName, points: "" }]);
       }
     });
-    return () => unsubscribe();
   }, [studentUsn]);
 
-  // 2. Active Verification Track Listener
   useEffect(() => {
     if (!selectedClub) return;
     const q = query(collection(db, "club_requests"), where("clubId", "==", selectedClub.clubId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot) => {
       const buffer = [];
       snapshot.forEach((d) => buffer.push({ id: d.id, ...d.data() }));
       setClubRequests(buffer.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
     });
-    return () => unsubscribe();
   }, [selectedClub]);
 
   const handleSelectClub = (club) => {
@@ -92,7 +114,16 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
     setParticipants([{ usn: studentUsn, name: studentName, points: "" }]);
   };
 
-  // Free Base64 Encoder Reader Helper
+  const handleOpenAnnouncement = (ann) => {
+    setSelectedAnnouncement(ann);
+    setOpenAnnDialog(true);
+    if (!viewedAnnouncements.includes(ann.announcementId)) {
+      const updated = [...viewedAnnouncements, ann.announcementId];
+      setViewedAnnouncements(updated);
+      localStorage.setItem(`viewed_announcements_${studentUsn}`, JSON.stringify(updated));
+    }
+  };
+
   const handleFileConversion = (e, target) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -104,22 +135,17 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
     reader.readAsDataURL(file);
   };
 
-  const addParticipantRow = () => {
-    setParticipants([...participants, { usn: "", name: "", points: "" }]);
-  };
-
+  const addParticipantRow = () => setParticipants([...participants, { usn: "", name: "", points: "" }]);
   const removeParticipantRow = (index) => {
     const list = [...participants];
     list.splice(index, 1);
     setParticipants(list);
   };
-
   const updateParticipantField = (index, field, value) => {
     const list = [...participants];
     list[index][field] = value;
     setParticipants(list);
   };
-
   const applyBulkPointsValue = (val) => {
     setBulkPoints(val);
     setParticipants(participants.map(p => ({ ...p, points: val })));
@@ -127,9 +153,6 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
 
   const handleCreateRequest = async (e) => {
     e.preventDefault();
-    setError("");
-    setSuccess("");
-
     if (!eventName.trim() || !fromDate || !toDate) {
       setError("Please satisfy all mandatory header core fields.");
       return;
@@ -143,7 +166,7 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
         fromDate,
         toDate,
         requestType,
-        proofUrl: proofBase64,
+        proofUrl: proofBase64.trim(),
         participants: participants.filter(p => p.usn.trim() !== ""),
         status: "pending_coordinator",
         coordinatorSapId: selectedClub.coordinatorSapId,
@@ -153,10 +176,7 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
       });
 
       setSuccess("Operational verification request successfully posted to Faculty Coordinator!");
-      setEventName("");
-      setFromDate("");
-      setToDate("");
-      setProofBase64("");
+      setEventName(""); setFromDate(""); setToDate(""); setProofBase64("");
       setParticipants([{ usn: studentUsn, name: studentName, points: "" }]);
     } catch (err) {
       setError("Failed to dispatch club verification token write.");
@@ -168,22 +188,19 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
     if (!annTitle.trim() || !annContent.trim()) return;
 
     try {
-      const updatedAnnouncements = [
-        {
-          announcementId: "ann_" + Date.now(),
-          title: annTitle.trim(),
-          content: annContent.trim(),
-          imageUrl: annImageBase64,
-          createdAt: new Date().toISOString()
-        },
-        ...(selectedClub.announcements || [])
-      ];
+      const newAnn = {
+        announcementId: "ann_" + Date.now(),
+        title: annTitle.trim(),
+        content: annContent, // Keeps layout alignment spaces intact
+        imageUrl: annImageBase64.trim(),
+        postedBy: studentName,
+        createdAt: new Date().toISOString()
+      };
 
+      const updatedAnnouncements = [newAnn, ...(selectedClub.announcements || [])];
       await updateDoc(doc(db, "clubs", selectedClub.id), { announcements: updatedAnnouncements });
       setSuccess("Announcement broadcast successfully pinned!");
-      setAnnTitle("");
-      setAnnContent("");
-      setAnnImageBase64("");
+      setAnnTitle(""); setAnnContent(""); setAnnImageBase64("");
     } catch (err) {
       setError("Failed to publish announcement matrix.");
     }
@@ -192,31 +209,31 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
   if (loading) return <Box textAlign="center" py={5}><CircularProgress /></Box>;
 
   return (
-    <Box>
+    // Box configuration matches the workspace panel widths perfectly, resolving layout overlap bugs
+    <Box sx={{ width: "100%", maxWidth: { xl: 1200 }, mx: "auto" }}>
       <Box sx={{ mb: 3, display: "flex", alignItems: "center", gap: 2 }}>
-        <IconButton onClick={onBack} sx={{ color: "white", bgcolor: "rgba(255,255,255,0.05)" }}>
-          <ArrowBackIcon />
-        </IconButton>
+        <IconButton onClick={onBack} sx={{ color: "white", bgcolor: "rgba(255,255,255,0.05)" }}><ArrowBackIcon /></IconButton>
         <Box>
-          <Typography variant="h5" fontWeight={700}>Club Operations Interface</Typography>
-          <Typography variant="caption" sx={{ color: "#c6c5d7", opacity: 0.6 }}>Verified administrative console workspace</Typography>
+          <Typography variant="h5" fontWeight={700}>Club Operations Portal</Typography>
+          <Typography variant="caption" sx={{ color: "#c6c5d7", opacity: 0.6 }}>Administrative control panel interface</Typography>
         </Box>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3, borderRadius: 2 }}>{success}</Alert>}
 
-      <Grid container spacing={3}>
-        <Grid item xs={12} lg={selectedClub ? 4 : 12}>
+      {/* Grid container with custom spacing constraints to fit sidebars without overlap */}
+      <Grid container spacing={{ xs: 2, lg: 3 }}>
+        <Grid item xs={12} md={4}>
           <Stack spacing={2}>
-            <Typography variant="subtitle2" fontWeight={700}>My Registered Affiliated Clubs</Typography>
+            <Typography variant="subtitle2" fontWeight={700} sx={{ color: '#c0c1ff', px: 0.5 }}>Affiliated Clubs</Typography>
             {myClubs.map((club) => {
               const isSelected = selectedClub?.id === club.id;
               return (
-                <Card key={club.id} onClick={() => handleSelectClub(club)} sx={{ cursor: "pointer", bgcolor: isSelected ? "rgba(192, 193, 255, 0.1)" : "rgba(25, 28, 29, 0.5)", border: isSelected ? "1px solid #c0c1ff" : "1px solid rgba(255,255,255,0.05)", color: "white" }}>
+                <Card key={club.id} onClick={() => handleSelectClub(club)} sx={{ cursor: "pointer", bgcolor: isSelected ? "rgba(192, 193, 255, 0.12)" : "rgba(25, 28, 29, 0.45)", border: isSelected ? "1px solid #c0c1ff" : "1px solid rgba(255,255,255,0.05)", color: "white" }}>
                   <CardContent sx={{ p: 2 }}>
                     <Typography variant="body1" fontWeight={700}>{club.clubName}</Typography>
-                    <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mt: 0.5 }}>Role: {club.members[studentUsn]?.role || "Cadet"}</Typography>
+                    <Typography variant="caption" sx={{ color: "#c6c5d7", display: "block", mt: 0.5 }}>Role Position: {club.members[studentUsn]?.role || "Cadet"}</Typography>
                   </CardContent>
                 </Card>
               );
@@ -225,34 +242,54 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
         </Grid>
 
         {selectedClub && (
-          <Grid item xs={12} lg={8}>
-            <Stack spacing={4}>
+          <Grid item xs={12} md={8}>
+            <Stack spacing={3}>
+              
+              {/* ANNOUNCEMENT COMPONENT WITH INTEGRATED COMPACT BULLET FEED LIST */}
               <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.4)", color: "white", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 3 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h6" fontWeight={700} color="secondary" sx={{ mb: 2, display: "flex", alignItems: "center", gap: 1 }}><CampaignIcon /> Announcement Bulletin Board</Typography>
+                  
                   {isPresident && (
-                    <Box component="form" onSubmit={handlePostAnnouncement} sx={{ mb: 3, p: 2, bgcolor: "rgba(0,0,0,0.15)", borderRadius: 2 }}>
+                    <Box component="form" onSubmit={handlePostAnnouncement} sx={{ mb: 3, p: 2, bgcolor: "rgba(0,0,0,0.18)", borderRadius: 2, border: "1px solid rgba(255,255,255,0.04)" }}>
                       <TextField fullWidth size="small" label="Heading Title" value={annTitle} onChange={(e)=>setAnnTitle(e.target.value)} sx={{ mb: 1.5 }} />
-                      <TextField fullWidth multiline rows={2} label="Announcement Details Content" value={annContent} onChange={(e)=>setAnnContent(e.target.value)} sx={{ mb: 1.5 }} />
-                      <Stack direction="row" alignItems="center" spacing={2}>
-                        <Button variant="outlined" component="label" size="small" startIcon={<CloudUploadIcon />} color="info">Upload Image<input type="file" hidden accept="image/*" onChange={(e) => handleFileConversion(e, "announcement")} /></Button>
-                        {annImageBase64 && <Chip label="Graphic Loaded" color="success" size="small" onDelete={()=>setAnnImageBase64("")} />}
+                      <TextField fullWidth multiline rows={2} label="Announcement Content Body" value={annContent} onChange={(e)=>setAnnContent(e.target.value)} sx={{ mb: 1.5 }} />
+                      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1.5 }}>
+                        <TextField fullWidth size="small" label="Image Link Web URL" value={annImageBase64} onChange={(e)=>setAnnImageBase64(e.target.value)} placeholder="e.g., https://site.com/photo.jpg" />
+                        <Typography variant="caption" color="textSecondary">OR</Typography>
+                        <Button variant="outlined" component="label" size="small" startIcon={<CloudUploadIcon />} color="info" sx={{ whiteSpace: "nowrap" }}>
+                          Upload File
+                          <input type="file" hidden accept="image/*" onChange={(e) => handleFileConversion(e, "announcement")} />
+                        </Button>
                       </Stack>
-                      <Box textAlign="right" sx={{ mt: 1.5 }}><Button type="submit" variant="contained" color="secondary" size="small" disabled={!annTitle.trim() || !annContent.trim()}>Pin Announcement</Button></Box>
+                      <Box textAlign="right"><Button type="submit" variant="contained" color="secondary" size="small" disabled={!annTitle.trim() || !annContent.trim()}>Pin Announcement</Button></Box>
                     </Box>
                   )}
-                  <Stack spacing={1.5} sx={{ maxHeight: 220, overflowY: "auto" }}>
-                    {(selectedClub.announcements || []).map((ann, i) => (
-                      <Paper key={i} variant="outlined" sx={{ p: 2, bgcolor: "rgba(255,255,255,0.02)", color: "white", borderColor: "rgba(255,255,255,0.05)" }}>
-                        <Typography variant="body1" fontWeight={700} color="#c0c1ff">{ann.title}</Typography>
-                        <Typography variant="body2" sx={{ opacity: 0.8, my: 1 }}>{ann.content}</Typography>
-                        {ann.imageUrl && <Box component="img" src={ann.imageUrl} sx={{ maxWidth: "100%", maxHeight: 140, borderRadius: 2, mt: 1 }} />}
-                      </Paper>
-                    ))}
+
+                  <Stack spacing={1.5} sx={{ maxHeight: 320, overflowY: "auto" }}>
+                    {(selectedClub.announcements || []).map((ann) => {
+                      const isNew = !viewedAnnouncements.includes(ann.announcementId);
+                      const imgSrc = renderImageSource(ann.imageUrl);
+                      return (
+                        <Paper key={ann.announcementId} variant="outlined" onClick={() => handleOpenAnnouncement(ann)} sx={{ p: 2, bgcolor: "rgba(0,0,0,0.2)", borderColor: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", transition: "0.2s", "&:hover": { bgcolor: "rgba(255,255,255,0.04)" } }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+                            <Box sx={{ flexGrow: 1 }}>
+                              <Stack direction="row" alignItems="center" spacing={1.5}>
+                                <Typography variant="body1" fontWeight={800}>{ann.title}</Typography>
+                                {isNew && <Chip label="NEW" size="small" sx={{ bgcolor: '#ef4444', color: 'white', fontWeight: 900, fontSize: '0.6rem', height: 18 }} />}
+                              </Stack>
+                              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.4)", display: "block", mt: 0.5 }}>Posted by: {ann.postedBy || "Club Admin"} • {new Date(ann.createdAt).toLocaleDateString()}</Typography>
+                            </Box>
+                            {imgSrc && <Box component="img" src={imgSrc} sx={{ width: 44, height: 44, borderRadius: 1.5, objectFit: "cover", border: '1px solid rgba(255,255,255,0.1)' }} />}
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
                   </Stack>
                 </CardContent>
               </Card>
 
+              {/* CLAIMS CREATION FORM & VIEW QUEUES */}
               <Card sx={{ bgcolor: "rgba(30, 32, 33, 0.4)", color: "white", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 3 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h6" fontWeight={700} color="primary" sx={{ mb: 2, display: "flex", alignItems: "center", gap: 1 }}><AssignmentTurnedInIcon /> Activity Points & Attendance Claims</Typography>
@@ -281,9 +318,10 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
                         </Stack>
                       ))}
                       <Button startIcon={<AddIcon />} size="small" onClick={addParticipantRow} sx={{ mt: 1, textTransform: "none" }}>Add Cadet Row Entry</Button>
-                      <Stack direction="row" sx={{ mt: 2 }} spacing={2}>
-                        <Button variant="outlined" component="label" size="small" startIcon={<CloudUploadIcon />}>Upload Claims Proof Document<input type="file" hidden onChange={(e) => handleFileConversion(e, "proof")} /></Button>
-                        {proofBase64 && <Chip label="Proof Document Active" color="success" size="small" onDelete={()=>setProofBase64("")} />}
+                      <Stack direction="column" spacing={1.5} sx={{ mt: 2 }}>
+                        <TextField fullWidth size="small" label="Paste Claim Proof Image Web URL Link directly" value={proofBase64} onChange={(e)=>setProofBase64(e.target.value)} placeholder="e.g. https://verify.com/doc.jpg" />
+                        <Typography variant="caption" color="textSecondary" sx={{ textAlign: "center" }}>OR</Typography>
+                        <Button variant="outlined" component="label" size="small" startIcon={<CloudUploadIcon />} sx={{ alignSelf: "flex-start" }}>Upload File<input type="file" hidden onChange={(e) => handleFileConversion(e, "proof")} /></Button>
                       </Stack>
                       <Box textAlign="right" sx={{ mt: 2 }}><Button type="submit" variant="contained" color="primary">Submit Operational Verification Request</Button></Box>
                     </Box>
@@ -291,37 +329,93 @@ const ClubOperationsPortal = ({ studentUsn, studentName, onBack }) => {
                   <Stack spacing={1.5} sx={{ maxHeight: 300, overflowY: "auto" }}>
                     {clubRequests.map((req) => (
                       <Paper 
-                         key={req.id} 
-                         variant="outlined" 
-                         onClick={() => {
-                           setSelectedRequest(req);
-                           setOpenRequestDetails(true);
-                         }}
-                         sx={{ 
-                            p: 2, 
-                            bgcolor: "rgba(0,0,0,0.2)", 
-                            borderColor: "rgba(255,255,255,0.06)", 
-                            color: "white", 
-                            cursor: "pointer", // Gives pointer feedback on hover
-                            "&:hover": { bgcolor: "rgba(255,255,255,0.04)" }
-                         }}
-                      >
+                        key={req.id} 
+                        variant="outlined" 
+                        onClick={() => {
+                          setSelectedRequest(req);
+                          setOpenRequestDetails(true); // <-- ENSURE THIS IS openRequestDetails
+                        }}
+                        sx={{ cursor: "pointer", p: 2, bgcolor: "rgba(0,0,0,0.2)" }}>
                         <Stack direction="row" justifyContent="space-between">
                           <Typography variant="body1" fontWeight={700} color="#ffb0ce">{req.eventName}</Typography>
                           <Chip label={req.status.replace("_", " ").toUpperCase()} size="small" color={req.status==="approved"?"success":(req.status==="rejected"?"error":"info")} />
                         </Stack>
-                        <Typography variant="caption" sx={{ display: "block", color: "rgba(255,255,255,0.4)", mt: 0.5 }}>Frame Window: {req.fromDate} to {req.toDate} | Category: {req.requestType.toUpperCase()}</Typography>
+                        <Typography variant="caption" sx={{ display: "block", color: "rgba(255,255,255,0.4)", mt: 0.5 }}>Window: {req.fromDate} to {req.toDate}</Typography>
                       </Paper>
                     ))}
                   </Stack>
                 </CardContent>
               </Card>
+
             </Stack>
           </Grid>
         )}
       </Grid>
+
+      {/* --- REFACTORED MULTI-LINE WEB STYLE DETAILED VIEWER --- */}
+      <Dialog 
+        open={openAnnDialog} 
+        onClose={() => setOpenAnnDialog(false)} 
+        fullWidth 
+        maxWidth="sm"
+        PaperProps={{ sx: { bgcolor: '#0f172a', color: 'white', borderRadius: 4 } }}
+      >
+        <DialogContent sx={{ p: 4 }}>
+          <Typography variant="h5" fontWeight={800} sx={{ color: '#c0c1ff', mb: 1, letterSpacing: '-0.5px' }}>
+            {selectedAnnouncement?.title}
+          </Typography>
+          
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 3 }}>
+            <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem', bgcolor: '#ec4899' }}>{selectedAnnouncement?.postedBy?.charAt(0)}</Avatar>
+            <Typography variant="caption" color="textSecondary">
+              Broadcast by <strong>{selectedAnnouncement?.postedBy || "Club Admin"}</strong>
+            </Typography>
+            <Typography variant="caption" color="textSecondary">•</Typography>
+            <Typography variant="caption" color="textSecondary">
+              {selectedAnnouncement && new Date(selectedAnnouncement.createdAt).toLocaleString()}
+            </Typography>
+          </Stack>
+          
+          <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)', mb: 3 }} />
+
+          {/* CRITICAL FIX: Sourced with white-space 'pre-wrap' parameters to prevent paragraphs collapsing */}
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              color: '#cbd5e1', 
+              lineHeight: 1.7, 
+              whiteSpace: 'pre-wrap', // Preserves your raw line breaks and indents perfectly
+              fontFamily: 'inherit',
+              mb: selectedAnnouncement?.imageUrl ? 3 : 0 
+            }}
+          >
+            {selectedAnnouncement?.content}
+          </Typography>
+
+          {selectedAnnouncement?.imageUrl && (
+            <Box 
+              component="img" 
+              src={renderImageSource(selectedAnnouncement.imageUrl)} 
+              sx={{ 
+                width: '100%', 
+                maxHeight: '70vh', // Allows the image to scale larger vertically if needed
+                borderRadius: 2, // FIX: Scale down to show the ENTIRE image without cropping
+                objectFit: 'contain', 
+                bgcolor: 'rgba(0, 0, 0, 0.3)',// Adds a soft dark background padding for wide/tall aspect ratios
+                mt: 2,
+                border: '1px solid rgba(255,255,255,0.1)' 
+              }} 
+            />
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 4, pb: 4 }}>
+          <Button onClick={() => setOpenAnnDialog(false)} variant="contained" color="secondary" sx={{ textTransform: 'none', borderRadius: 3, px: 4, fontWeight: 700 }}>
+            Close Announcement
+          </Button>
+        </DialogActions>
+      </Dialog>
       <ClubRequestDetailDialog
-        open={openRequestDetails}
+        open={openRequestDetails} // <-- MATCH THIS STATE
         onClose={() => setOpenRequestDetails(false)}
         request={selectedRequest}
         isFaculty={false}
