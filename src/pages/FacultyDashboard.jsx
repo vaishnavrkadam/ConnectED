@@ -31,6 +31,7 @@ import {
   or
 } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
+import FacultyInterestGroupsControl from "../components/FacultyInterestGroupsControl";
 import DoubtResolutionDialog from '../components/DoubtResolutionDialog';
 import ScheduleDoubtMeeting from '../components/ScheduleDoubtMeeting';
 import AcceptChoiceDialog from '../components/AcceptChoiceDialog'; 
@@ -48,6 +49,8 @@ import LogoutIcon from "@mui/icons-material/Logout";
 
 import ClubRequestDetailDialog from "../components/ClubRequestDetailDialog";
 import collegeBg from "../assets/college-bg-entr.jpg";
+import FacultyAppointmentsPortal from "../components/FacultyAppointmentsPortal";
+import EventIcon from "@mui/icons-material/Event";
 
 const getAsDate = (val) => {
   if (!val) return new Date(0);
@@ -329,7 +332,9 @@ const FacultyDashboard = () => {
           {[
             { id: "overview", text: "Dashboard Overview", icon: <DashboardIcon /> },
             { id: "doubts", text: "Doubt Management", icon: <QuestionAnswerIcon /> },
-            { id: "clubs", text: "Club Operations", icon: <GroupsIcon /> }
+            { id: "clubs", text: "Club Operations", icon: <GroupsIcon /> },
+            { id: "interest_control", text: "Interest Group Controls", icon: <GroupsIcon /> },
+            { id: "appointments", text: "Appointment Bookings", icon: <EventIcon /> }
           ].map((item) => (
             <ListItem
               button
@@ -626,6 +631,17 @@ const FacultyDashboard = () => {
               </Grid>
             )}
           </Box>
+        )}
+        {/* VIEW 4: ROUTE MAP TARGET TO INTEREST GROUPS CLEARANCE CONTROL */}
+        {activeTab === "interest_control" && (
+          <FacultyInterestGroupsControl
+            facultySapId={sapIdentifier} // Transmits the active professor's unique login ID parameter safely
+          />
+        )}
+        {activeTab === "appointments" && (
+          <FacultyAppointmentsPortal
+            facultySapId={sapIdentifier} // References the logged-in teacher's active workspace identification key safely
+          />
         )}
 
       </Box>

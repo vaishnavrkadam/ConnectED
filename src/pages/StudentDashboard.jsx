@@ -32,6 +32,7 @@ import { db } from "../firebase";
 
 // Sidebar & General Icons
 import DashboardIcon from "@mui/icons-material/Dashboard";
+import InterestGroupsPortal from "../components/InterestGroupsPortal"; // <-- NEW SAFE COMPONENT IMPORT
 import QuestionAnswerIcon from "@mui/icons-material/QuestionAnswer";
 import GroupsIcon from "@mui/icons-material/Groups";
 import AssignmentIcon from "@mui/icons-material/Assignment";
@@ -48,6 +49,7 @@ import DoubtResolutionDialog from "../components/DoubtResolutionDialog";
 import ClubOperationsPortal from "../components/ClubOperationsPortal";
 // import DoubtResolutionPortal from "../components/DoubtResolutionPortal"; // Commented out to prevent crash: component is defined at the bottom of this file
 import collegeBg from "../assets/college-bg-entr.jpg";
+import AppointmentsPortal from "../components/AppointmentsPortal";
 
 const StudentDashboard = () => {
   const { profile, extendedProfile, signOut } = useAuth();
@@ -232,8 +234,8 @@ const StudentDashboard = () => {
             { id: "overview", text: "Dashboard Overview", icon: <DashboardIcon /> },
             { id: "doubts", text: "Doubt Resolution", icon: <QuestionAnswerIcon /> },
             { id: "clubs", text: "Club Operations", icon: <GroupsIcon /> },
-            { id: "mentorship", text: "Project Teams", icon: <AssignmentIcon /> },
-            { id: "appointments", text: "Counseling Slots", icon: <EventIcon /> }
+            { id: "mentorship", text: "Interest Groups", icon: <AssignmentIcon /> },
+            { id: "appointments", text: "Book Appointment", icon: <EventIcon /> }
           ].map((item) => (
             <ListItem
               button
@@ -464,14 +466,27 @@ const StudentDashboard = () => {
             onBack={() => setActiveTab("overview")}
           />
         )}
+        {activeTab === "mentorship" && (
+          <InterestGroupsPortal
+            studentUsn={usnIdentifier}
+            studentName={studentData.name}
+            onBack={() => setActiveTab("overview")}
+          />
+        )}
+        {activeTab === "appointments" && (
+          <AppointmentsPortal
+            studentUsn={usnIdentifier}
+            studentName={studentData.name}
+            counsellorSapId={studentData.counsellorSapId || ""} // Fetched dynamically from your Firestore student profile schema
+            onBack={() => setActiveTab("overview")}
+          />
+        )}
+        
 
 
         {/* OTHER FALLBACK TARGET MODULES */}
-        {activeTab !== "overview" && activeTab !== "doubts" && activeTab !== "clubs" && (
-          <Box>
-            <Button startIcon={<ArrowBackIcon />} onClick={() => setActiveTab("overview")} sx={{ color: "#c0c1ff", mb: 3, textTransform: "none" }}>Back to Overview</Button>
-            
-          </Box>
+        {activeTab !== "overview" && activeTab !== "doubts" && activeTab !== "clubs" && activeTab !== "mentorship" && (
+          <Box><Button startIcon={<ArrowBackIcon />} onClick={() => setActiveTab("overview")} sx={{ color: "#c0c1ff", mb: 3, textTransform: "none" }}>Back to Overview</Button></Box>
         )}
       </Box>
 

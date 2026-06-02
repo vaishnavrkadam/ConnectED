@@ -48,6 +48,7 @@ import CampaignIcon from "@mui/icons-material/Campaign";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import AssignmentIcon from "@mui/icons-material/Assignment"; // <-- ENSURE THIS IS IMPORTED
 
 import ClubRequestDetailDialog from "../components/ClubRequestDetailDialog";
 import collegeBg from "../assets/college-bg-entr.jpg";
@@ -223,9 +224,31 @@ const DeanDashboard = () => {
             { id: "overview", text: "Pending Approvals", icon: <AssignmentTurnedInIcon /> },
             { id: "clubs", text: "Clubs Directory Control", icon: <GroupsIcon /> },
             { id: "broadcasts", text: "Global Broadcasts", icon: <CampaignIcon /> },
-            { id: "manual", text: "Direct Allocation Control", icon: <PersonAddIcon /> }
+            { id: "manual", text: "Direct Allocation Control", icon: <PersonAddIcon /> },
+            { id: "external_allocation", text: "Assign EL Mentors", icon: <AssignmentIcon /> }
           ].map((item) => (
-            <ListItem button key={item.id} onClick={() => { setActiveTab(item.id); setError(""); setSuccess(""); }} sx={{ borderRadius: 2, mb: 0.5, bgcolor: activeTab === item.id ? "rgba(192, 193, 255, 0.12)" : "transparent", color: activeTab === item.id ? "#c0c1ff" : "#e2e2e4", cursor: "pointer", "&:hover": { bgcolor: "rgba(255,255,255,0.05)" } }}>
+            <ListItem 
+              button 
+              key={item.id} 
+              onClick={() => { 
+                if (item.id === "external_allocation") {
+                  // Opens your standalone ML application securely in a new browser tab
+                  window.open("https://mentor-al-location.web.app/", "_blank");
+                } else {
+                  setActiveTab(item.id); 
+                  setError(""); 
+                  setSuccess(""); 
+                }
+              }} 
+              sx={{ 
+                borderRadius: 2, 
+                mb: 0.5, 
+                bgcolor: activeTab === item.id ? "rgba(192, 193, 255, 0.12)" : "transparent", 
+                color: activeTab === item.id ? "#c0c1ff" : "#e2e2e4", 
+                cursor: "pointer", 
+                "&:hover": { bgcolor: "rgba(255,255,255,0.05)" } 
+              }}
+            >
               <Box sx={{ mr: 1.5, display: "flex", color: activeTab === item.id ? "#c0c1ff" : "inherit" }}>{item.icon}</Box>
               <ListItemText primary={item.text} primaryTypographyProps={{ fontSize: "0.88rem", fontWeight: 600 }} />
             </ListItem>
